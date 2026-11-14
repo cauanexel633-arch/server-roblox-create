@@ -159,7 +159,9 @@ app.get("/v1/weapons/:id/package",async(req,reply)=>{
 
 const processQueue=async(req:import("fastify").FastifyRequest,reply:import("fastify").FastifyReply)=>{
   const auth=String(req.headers.authorization??"");
-  if(!config.CRON_SECRET||auth!==`Bearer ${config.CRON_SECRET}`) return reply.code(401).send({error:"unauthorized"});
+  const cronAuthorized=Boolean(config.CRON_SECRET && auth===`Bearer ${config.CRON_SECRET}`);
+  const robloxAuthorized=verifyRobloxToken(req.headers as Record<string,unknown>);
+  if(!cronAuthorized&&!robloxAuthorized) return reply.code(401).send({error:"unauthorized"});
   let processed=0;
   for(let i=0;i<config.MAX_JOB_STAGES_PER_TICK;i++){const did=await processOneJob();if(!did)break;processed++;}
   return {processed};
