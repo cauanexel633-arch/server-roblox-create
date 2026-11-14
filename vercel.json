@@ -9,8 +9,5 @@
       "source": "/:path*",
       "destination": "/api/index?__forge_original_path=/:path*"
     }
-  ],
-  "crons": [
-    { "path": "/internal/process-queue", "schedule": "*/5 * * * *" }
   ]
 }
