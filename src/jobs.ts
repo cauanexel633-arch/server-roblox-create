@@ -18,8 +18,9 @@ async function publishGlbToRoblox(
   tenantId: string,
   description: string,
   existingResult: Record<string, unknown>,
-  glbPath: string
-): Promise<{ assetId: string; assetPath: string }> {
+  glbPath: string,
+  agentSpec: string
+): Promise<{ status: "pending"; operationPath: string } | { status: "completed"; assetId: string; assetPath: string }> {
   if (!config.ROBLOX_OPEN_CLOUD_API_KEY || !config.ROBLOX_CREATOR_USER_ID) {
     throw new Error("Publicação Roblox não configurada: verifique ROBLOX_OPEN_CLOUD_API_KEY e ROBLOX_CREATOR_USER_ID na Vercel.");
   }
@@ -54,7 +55,7 @@ async function publishGlbToRoblox(
       method: "POST",
       headers: { "x-api-key": config.ROBLOX_OPEN_CLOUD_API_KEY },
       body: form,
-      signal: AbortSignal.timeout(25000)
+      signal: AbortSignal.timeout(20000)
     });
     const uploadBody = await uploadResponse.json().catch(() => ({})) as RobloxOperation & { message?: string };
     if (!uploadResponse.ok) {
@@ -66,36 +67,29 @@ async function publishGlbToRoblox(
     }
     operationPath = uploadBody.path;
     const { error: saveOperationError } = await db.from("forge_jobs")
-      .update({ result: { ...existingResult, roblox_operation_path: operationPath }, updated_at: new Date().toISOString() })
+      .update({ result: { ...existingResult, roblox_operation_path: operationPath, agent_spec: agentSpec }, updated_at: new Date().toISOString() })
       .eq("id", jobId).eq("tenant_id", tenantId);
     if (saveOperationError) throw new Error(`Não foi possível salvar a operação de publicação: ${saveOperationError.message}`);
   }
 
   const operationId = operationPath.slice("operations/".length);
-  let operation: RobloxOperation | null = null;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const response = await fetch(`https://apis.roblox.com/assets/v1/operations/${encodeURIComponent(operationId)}`, {
-      headers: { "x-api-key": config.ROBLOX_OPEN_CLOUD_API_KEY },
-      signal: AbortSignal.timeout(10000)
-    });
-    const body = await response.json().catch(() => ({})) as RobloxOperation;
-    if (!response.ok) {
-      const detail = body.error?.message ?? `HTTP ${response.status}`;
-      throw new Error(`Roblox Get Operation falhou: ${String(detail).slice(0, 350)}`);
-    }
-    operation = body;
-    if (body.done) break;
-    await new Promise(resolve => setTimeout(resolve, 1200));
+  const response = await fetch(`https://apis.roblox.com/assets/v1/operations/${encodeURIComponent(operationId)}`, {
+    headers: { "x-api-key": config.ROBLOX_OPEN_CLOUD_API_KEY },
+    signal: AbortSignal.timeout(8000)
+  });
+  const operation = await response.json().catch(() => ({})) as RobloxOperation;
+  if (!response.ok) {
+    const detail = operation.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(`Roblox Get Operation falhou: ${String(detail).slice(0, 350)}`);
   }
-
-  if (!operation?.done) throw new Error("Roblox ainda está processando o modelo; a fila tentará consultar a mesma operação novamente.");
+  if (!operation.done) return { status: "pending", operationPath };
   if (operation.error) throw new Error(`Roblox rejeitou a publicação: ${operation.error.message ?? operation.error.code ?? "erro desconhecido"}`);
 
   const assetId = operation.response?.assetId;
   const assetPath = operation.response?.path ?? (assetId ? `assets/${assetId}` : "");
   if (!assetId || !assetPath) throw new Error("Roblox concluiu a operação sem retornar assetId.");
 
-  return { assetId: String(assetId), assetPath };
+  return { status: "completed", assetId: String(assetId), assetPath };
 }
 
 export async function createJob(tenantId: string, payload: Record<string, unknown>, idempotencyKey: string) {
@@ -126,15 +120,22 @@ export async function processOneJob() {
     await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id);
     const request=job.request as Record<string,unknown>;
     const description=String(request.weapon_description??"Arma de fantasia");
-    console.info("[Forge3D] agent started", { job_id, stage: "SpecInterpreter" });
-    const intent=await runAgent("SpecInterpreter",{
-      description,
-      category:request.category,
-      style:request.style,
-      server_policy:request.server_prompt,
-      player_user_id: (request.player as {user_id?:string}|undefined)?.user_id
-    });
-    console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
+    const previousResult = (job.result && typeof job.result === "object" ? job.result : {}) as Record<string, unknown>;
+    let intent: string;
+    if (typeof previousResult.agent_spec === "string" && previousResult.agent_spec.length > 0) {
+      intent = previousResult.agent_spec;
+      console.info("[Forge3D] resuming Roblox publication", { job_id, operation: previousResult.roblox_operation_path });
+    } else {
+      console.info("[Forge3D] agent started", { job_id, stage: "SpecInterpreter" });
+      intent=await runAgent("SpecInterpreter",{
+        description,
+        category:request.category,
+        style:request.style,
+        server_policy:request.server_prompt,
+        player_user_id: (request.player as {user_id?:string}|undefined)?.user_id
+      });
+      console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
+    }
     const mesh=createSwordMesh(config.MAX_TRIANGLES);
     const glb=meshToGlb(mesh);
     const obj=meshToObj(mesh);
@@ -142,11 +143,24 @@ export async function processOneJob() {
     const glbPath=`${base}/weapon.glb`,objPath=`${base}/weapon.obj`;
     const {error:glbError}=await db.storage.from("packages").upload(glbPath,glb,{contentType:"model/gltf-binary",upsert:true});
     if(glbError) throw new Error(`Upload GLB: ${glbError.message}`);
-    const previousResult = (job.result && typeof job.result === "object" ? job.result : {}) as Record<string, unknown>;
-    const robloxAsset = await publishGlbToRoblox(db, job_id, tenant_id, description, previousResult, glbPath);
+    const robloxAsset = await publishGlbToRoblox(db, job_id, tenant_id, description, previousResult, glbPath, intent);
+    if (robloxAsset.status === "pending") {
+      const { error: pendingUpdateError } = await db.from("forge_jobs").update({
+        status: "queued",
+        progress: 90,
+        current_stage: "roblox_publishing",
+        result: { ...previousResult, roblox_operation_path: robloxAsset.operationPath, agent_spec: intent },
+        updated_at: new Date().toISOString()
+      }).eq("id", job_id).eq("tenant_id", tenant_id);
+      if (pendingUpdateError) throw new Error(`Falha ao salvar estado pendente do Roblox: ${pendingUpdateError.message}`);
+      const { error: retryError } = await db.rpc("forge_retry_job", { p_msg_id: msg.msg_id, p_delay_seconds: 20 });
+      if (retryError) throw new Error(`Falha ao reagendar consulta da publicação: ${retryError.message}`);
+      console.info("[Forge3D] Roblox operation pending; same job rescheduled without consuming an attempt", { job_id, operation: robloxAsset.operationPath });
+      return true;
+    }
     const {error:objError}=await db.storage.from("packages").upload(objPath,Buffer.from(obj),{contentType:"text/plain",upsert:true});
     if(objError) throw new Error(`Upload OBJ: ${objError.message}`);
-    const manifest={schema_version:"1.0",job_id,tenant_id,description,roblox_asset:robloxAsset,mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),limitations:["UV/PBR textures, rigging, keyframed animation and Roblox RBXMX are not generated in this release."]};
+    const manifest={schema_version:"1.0",job_id,tenant_id,description,roblox_asset:{assetId:robloxAsset.assetId,assetPath:robloxAsset.assetPath},mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),limitations:["UV/PBR textures, rigging, keyframed animation and Roblox RBXMX are not generated in this release."]};
     const manifestPath=`${base}/manifest.json`;
     const {error:manifestError}=await db.storage.from("packages").upload(manifestPath,Buffer.from(JSON.stringify(manifest,null,2)),{contentType:"application/json",upsert:true});
     if(manifestError) throw new Error(`Upload manifesto: ${manifestError.message}`);
