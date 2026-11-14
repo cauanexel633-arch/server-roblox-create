@@ -43,7 +43,7 @@ app.post("/v1/generate",async(req,reply)=>{
   if(error) throw error;
   if(!tenant) return reply.code(403).send({error:"universe_not_registered"});
   const result=await createJob(tenant.id,parsed.data as unknown as Record<string,unknown>,parsed.data.idempotency_key);
-  return reply.code(202).send({job_id:result.id,status:result.status,progress:result.progress??0,status_url:`/v1/jobs/${result.id}`});
+  return reply.code(202).send({job_id:result.id,status:result.status,progress:("progress" in result ? result.progress : 0),status_url:`/v1/jobs/${result.id}`});
 });
 app.get("/v1/jobs/:id",async(req,reply)=>{
   await authenticate(req);
@@ -84,7 +84,7 @@ app.post("/internal/process-queue",processQueue);
 app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"request_failed");
   const status=Number((error as {statusCode?:number}).statusCode??500);
-  return reply.code(status>=400&&status<600?status:500).send({error:status>=500?"internal_error":"request_error",message:status>=500?"Falha interna":error.message,trace_id:req.id});
+  return reply.code(status>=400&&status<600?status:500).send({error:status>=500?"internal_error":"request_error",message:status>=500?"Falha interna":(error instanceof Error ? error.message : "Erro na requisição"),trace_id:req.id});
 });
 if (process.env.VERCEL !== "1") app.listen({port:Number(process.env.PORT??3000)});
 export default app;
