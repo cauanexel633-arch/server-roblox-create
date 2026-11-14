@@ -5,7 +5,7 @@
   "description": "Forge3D Cloud — motor de geração de armas e assets 3D para Roblox (backend serverless).",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "packageManager": "pnpm@12.18.0",
   "scripts": {
