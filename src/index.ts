@@ -10,6 +10,10 @@ const app=Fastify({
   bodyLimit:64*1024,
   genReqId:()=>crypto.randomUUID()
 });
+
+// Fastify already registers application/json. Replace its parser so the
+// original request body remains available for HMAC signature verification.
+app.removeContentTypeParser("application/json");
 app.addContentTypeParser("application/json",{parseAs:"string"},(req,body,done)=>{
   try { const raw=String(body); (req as typeof req & {rawBody?:string}).rawBody=raw; done(null,JSON.parse(raw)); }
   catch(error){done(error as Error,undefined);}
