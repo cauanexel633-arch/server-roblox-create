@@ -6,7 +6,7 @@ import { verifyForgeRequest, verifyRobloxToken } from "./security.js";
 import { createJob, processOneJob } from "./jobs.js";
 
 const app=Fastify({
-  logger:{level:config.LOG_LEVEL,redact:{paths:["req.headers.authorization","req.headers.x-forge-signature","req.headers.x-forge-nonce"],censor:"[REDACTED]"}},
+  logger:{level:config.LOG_LEVEL,redact:{paths:["req.headers.authorization","req.headers.x-forge-token","req.headers.x-forge-signature","req.headers.x-forge-nonce"],censor:"[REDACTED]"}},
   bodyLimit:64*1024,
   genReqId:()=>crypto.randomUUID()
 });
@@ -87,9 +87,15 @@ app.post("/v1/generate",async(req,reply)=>{
     .contains("request",{player:{user_id:parsed.data.player.user_id}})
     .gte("created_at",since);
   if(rateError) throw rateError;
-  const alreadyExists=await db.from("forge_jobs").select("id")
+  const alreadyExists=await db.from("forge_jobs").select("id,request")
     .eq("tenant_id",tenant.id).eq("idempotency_key",parsed.data.idempotency_key).maybeSingle();
   if(alreadyExists.error) throw alreadyExists.error;
+  if(alreadyExists.data) {
+    const existingRequest=alreadyExists.data.request as {player?:{user_id?:string}}|null;
+    if(String(existingRequest?.player?.user_id??"")!==parsed.data.player.user_id) {
+      return reply.code(409).send({error:"idempotency_key_conflict"});
+    }
+  }
   if(!alreadyExists.data && (playerJobCount??0)>=config.MAX_PLAYER_JOBS_PER_HOUR) {
     return reply.code(429).send({error:"player_rate_limit",limit:config.MAX_PLAYER_JOBS_PER_HOUR,window_seconds:3600});
   }
