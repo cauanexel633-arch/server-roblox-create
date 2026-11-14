@@ -44,7 +44,7 @@ $$;
 create or replace function public.forge_ack_job(p_msg_id bigint)
 returns boolean language sql security definer set search_path=public,pgmq as $$ select pgmq.delete('forge_jobs',p_msg_id); $$;
 create or replace function public.forge_retry_job(p_msg_id bigint,p_delay_seconds integer default 30)
-returns void language plpgsql security definer set search_path=public,pgmq as $ begin perform pgmq.set_vt('forge_jobs',p_msg_id,p_delay_seconds); end; $$;
+returns void language plpgsql security definer set search_path=public,pgmq as $$ begin perform pgmq.set_vt('forge_jobs',p_msg_id,p_delay_seconds); end; $$;
 create or replace function public.forge_dlq_job(p_msg_id bigint,p_job_id uuid,p_tenant_id uuid,p_error text)
 returns bigint language plpgsql security definer set search_path=public,pgmq as $$
 declare v_msg bigint;
