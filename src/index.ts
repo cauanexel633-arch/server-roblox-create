@@ -79,8 +79,8 @@ const processQueue=async(req:import("fastify").FastifyRequest,reply:import("fast
   for(let i=0;i<config.MAX_JOB_STAGES_PER_TICK;i++){const did=await processOneJob();if(!did)break;processed++;}
   return {processed};
 };
-app.get("/api/internal/process-queue",processQueue);
-app.post("/api/internal/process-queue",processQueue);
+app.get("/internal/process-queue",processQueue);
+app.post("/internal/process-queue",processQueue);
 app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"request_failed");
   const status=Number((error as {statusCode?:number}).statusCode??500);
