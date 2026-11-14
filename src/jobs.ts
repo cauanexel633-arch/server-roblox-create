@@ -33,6 +33,7 @@ export async function processOneJob() {
     await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id);
     const request=job.request as Record<string,unknown>;
     const description=String(request.weapon_description??"Arma de fantasia");
+    console.info("[Forge3D] agent started", { job_id, stage: "SpecInterpreter" });
     const intent=await runAgent("SpecInterpreter",{
       description,
       category:request.category,
@@ -40,6 +41,7 @@ export async function processOneJob() {
       server_policy:request.server_prompt,
       player_user_id: (request.player as {user_id?:string}|undefined)?.user_id
     });
+    console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
     const mesh=createSwordMesh(config.MAX_TRIANGLES);
     const glb=meshToGlb(mesh);
     const obj=meshToObj(mesh);
@@ -61,6 +63,7 @@ export async function processOneJob() {
     return true;
   } catch(error) {
     const message=error instanceof Error?error.message:"unknown";
+    console.error("[Forge3D] job failed; scheduling retry", { job_id, message });
     const {data:state}=await db.from("forge_jobs").select("attempts").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
     const attempts=Number(state?.attempts??0)+1;
     if(attempts>=3){
