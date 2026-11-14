@@ -4,6 +4,10 @@
  * única Vercel Function. O build da Vercel exige que este arquivo importe
  * `fastify` diretamente, por isso a instância é criada aqui e configurada em
  * `apps/api`. Localmente, `pnpm dev` sobe o mesmo servidor.
+ *
+ * `listen` segue o formato da documentação da Vercel: sem `await` e sem `host`.
+ * Com `await app.listen({ host: "0.0.0.0" })` a função falhava com
+ * INTERNAL_FUNCTION_INVOCATION_FAILED em produção.
  */
 import Fastify from "fastify";
 import { configureApp, fastifyOptions } from "../apps/api/index.js";
@@ -28,4 +32,4 @@ configureApp(app, {
   ...(keyResolver ? { keyResolver } : {}),
 });
 
-await app.listen({ port: Number(process.env.PORT ?? 3000), host: "0.0.0.0" });
+app.listen({ port: Number(process.env.PORT ?? 3000) });
