@@ -38,8 +38,9 @@ e fila chegam na F1/F2.
 7. **Região `gru1`** (São Paulo) no `vercel.json` como padrão provisório. Deve coincidir com a
    região do projeto Supabase; ajustar quando o projeto for criado.
 
-8. **`maxDuration: 60`** é um valor conservador provisório; o limite real depende do plano e
-   será revisado na F2 conforme a conta Vercel disponível.
+8. **Sem `maxDuration` no `vercel.json`.** Declarar `functions` para `src/index.ts` quebra o build
+   (a Vercel exige que o padrão case com arquivos em `api/`). O Fastify zero-config usa o limite padrão
+   do plano; o ajuste fino fica para a F2, conforme a conta Vercel.
 
 ## Limitações conhecidas da F0
 - `POST /v1/generate` valida e autentica, mas não cria jobs (503 `not_ready`).
