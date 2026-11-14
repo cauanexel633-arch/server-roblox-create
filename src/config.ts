@@ -9,13 +9,16 @@ const schema = z.object({
   FORGE_HMAC_KEY_ID_PREVIOUS: z.string().optional(),
   FORGE_HMAC_SECRET: z.string().min(32).optional(),
   FORGE_HMAC_SECRET_PREVIOUS: z.string().min(32).optional(),
+  // Shared only by trusted Roblox server Scripts and the Forge3D API. Never expose to clients.
+  FORGE_ROBLOX_TOKEN: z.string().min(32).optional(),
   CRON_SECRET: z.string().min(24).optional(),
   APP_ENV: z.enum(["development", "preview", "production"]).default("production"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   OPENROUTER_SITE_URL: z.string().url().optional(),
   OPENROUTER_APP_NAME: z.string().default("Forge3D Cloud"),
   MAX_JOB_STAGES_PER_TICK: z.coerce.number().int().min(1).max(10).default(1),
-  MAX_TRIANGLES: z.coerce.number().int().min(100).max(50000).default(20000)
+  MAX_TRIANGLES: z.coerce.number().int().min(100).max(50000).default(20000),
+  MAX_PLAYER_JOBS_PER_HOUR: z.coerce.number().int().min(1).max(20).default(3)
 });
 
 export const config = schema.parse(Object.fromEntries(Object.entries(process.env).map(([key,value]) => [key, value === "" ? undefined : value])));
