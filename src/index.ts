@@ -125,7 +125,7 @@ app.get("/v1/jobs/:id",async(req,reply)=>{
   const {job}=await findOwnedJob(params.id,query.data.user_id,query.data.universe_id);
   if(!job) return reply.code(404).send({error:"not_found"});
   const {request:_privateRequest,...publicJob}=job;
-  return publicJob;
+  return {...publicJob,user_id:query.data.user_id};
 });
 
 app.post("/v1/jobs/:id/cancel",async(req,reply)=>{
