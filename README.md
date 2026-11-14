@@ -8,6 +8,10 @@ Esta reconstrução estabelece a fundação executável: API Fastify para Vercel
 
 Não declare como concluídos recursos ainda não implementados. Rigging/skinning, UV unwrap/packing, texturas PBR rasterizadas, animações com keyframes, renderização, AST Luau completa, auditoria isolada Ed25519, busca vetorial e publicação Open Cloud são etapas posteriores. Consulte `docs/STATUS.md`.
 
+## Integração Roblox
+
+A primeira integração server-to-server para solicitações por jogador está em `docs/ROBLOX_INTEGRATION.md`, com exemplos Luau em `roblox/`. O backend associa jobs a `player.user_id`, protege status/pacotes por jogador e aplica limite por hora. A entrega final como Tool ainda depende de importação/publicação do modelo como asset Roblox.
+
 ## Stack
 
 - Node.js 22 + TypeScript strict + Fastify 5

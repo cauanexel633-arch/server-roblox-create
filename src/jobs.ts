@@ -33,7 +33,13 @@ export async function processOneJob() {
     await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id);
     const request=job.request as Record<string,unknown>;
     const description=String(request.weapon_description??"Arma de fantasia");
-    const intent=await runAgent("SpecInterpreter",{description,category:request.category,style:request.style});
+    const intent=await runAgent("SpecInterpreter",{
+      description,
+      category:request.category,
+      style:request.style,
+      server_policy:request.server_prompt,
+      player_user_id: (request.player as {user_id?:string}|undefined)?.user_id
+    });
     const mesh=createSwordMesh(config.MAX_TRIANGLES);
     const glb=meshToGlb(mesh);
     const obj=meshToObj(mesh);

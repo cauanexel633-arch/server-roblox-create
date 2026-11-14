@@ -11,13 +11,18 @@
 - [x] Exportação binária GLB e OBJ reais, manifesto e SHA-256
 - [x] Processamento retomável por Cron com checkpoint de estágio
 - [x] Endpoints health, ready, generate, job, cancel e package
+- [x] Integração inicial Roblox server-to-server com token em header secreto
+- [x] Associação de jobs ao UserId, autorização de status/pacote/cancelamento por jogador e universo
+- [x] Limite configurável de solicitações por jogador/hora e proteção de colisão de idempotency key
+- [x] Exemplos Luau de interface cliente e controlador no servidor Roblox
+- [ ] Teste E2E em experiência Roblox publicada e validação de Experience Secrets
 
 ## Parcial / depende de credenciais ou validação externa
 
 - [ ] Integração Supabase real: requer variáveis e migrations aplicadas no projeto do usuário
 - [ ] OpenRouter real: requer chave e disponibilidade de modelos gratuitos
 - [ ] Cron em produção: depende do projeto Vercel conectado e deployment READY
-- [ ] Integração Roblox Open Cloud: adaptador ainda não incluído nesta fase
+- [ ] Publicação/importação do GLB/OBJ como asset Roblox: Open Cloud Assets API ou pipeline equivalente ainda não incluído
 
 ## Ainda não implementado — não considerar concluído
 
