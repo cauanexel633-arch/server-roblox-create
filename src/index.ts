@@ -14,8 +14,19 @@ const app=Fastify({
 // Preserve the exact JSON bytes because HMAC signatures cover the raw body.
 app.removeContentTypeParser("application/json");
 app.addContentTypeParser("application/json",{parseAs:"string"},(req,body,done)=>{
-  try { const raw=String(body); (req as typeof req & {rawBody?:string}).rawBody=raw; done(null,JSON.parse(raw)); }
-  catch(error){done(error as Error,undefined);}
+  const raw=String(body);
+  (req as typeof req & {rawBody?:string}).rawBody=raw;
+
+  if (!raw.trim()) {
+    done(null, {});
+    return;
+  }
+
+  try {
+    done(null, JSON.parse(raw));
+  } catch(error) {
+    done(error as Error, undefined);
+  }
 });
 
 const generateSchema=z.object({
