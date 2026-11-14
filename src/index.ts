@@ -22,7 +22,7 @@ const generateSchema=z.object({
   universe_id:z.number().int().positive(),
   player:z.object({
     // Roblox UserIds are decimal identifiers. Keep them as strings to avoid precision loss.
-    user_id:z.string().regex(/^\\d{1,20}$/),
+    user_id:z.string().regex(/^\d{1,20}$/),
     username:z.string().max(64).optional()
   }),
   weapon_description:z.string().trim().min(8).max(1000),
@@ -37,7 +37,7 @@ const generateSchema=z.object({
 });
 const idSchema=z.string().uuid();
 const ownerQuerySchema=z.object({
-  user_id:z.string().regex(/^\\d{1,20}$/),
+  user_id:z.string().regex(/^\d{1,20}$/),
   universe_id:z.coerce.number().int().positive()
 });
 
