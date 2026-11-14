@@ -7,6 +7,7 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AssetService = game:GetService("AssetService")
 
 local API_BASE = "https://server-roblox-create.vercel.app"
 local UNIVERSE_ID = 10776153543
@@ -134,31 +135,49 @@ local function processWeaponRequest(player: Player, description: string)
 		})
 
 		if job.status == "completed" then
-			local packageOk, packageData = pcall(function()
-				return requestApi(
-					"GET",
-					string.format("/v1/weapons/%s/package?universe_id=%d&user_id=%s", jobId, UNIVERSE_ID, tostring(player.UserId))
-				)
-			end)
-			if not packageOk then
-				warn("[Forge3D] package lookup failed:", packageData)
-				sendStatus(player, "error", {message = "A arma foi gerada, mas não foi possível obter o pacote."})
+			local assetId = tonumber(job.result and job.result.asset_id)
+			if not assetId then
+				warn("[Forge3D] completed job without Roblox asset_id:", jobId)
+				sendStatus(player, "error", {message = "A geração terminou, mas o Roblox não retornou o ID do modelo."})
 				return
 			end
 
-			-- The current backend returns private, short-lived GLB/OBJ/manifest URLs.
-			-- Roblox cannot turn a GLB URL into a live Tool at runtime. A Roblox asset
-			-- publishing/import pipeline is required before this final delivery step.
+			local weaponsFolder = ReplicatedStorage:FindFirstChild("armas_AU")
+			if not weaponsFolder then
+				weaponsFolder = Instance.new("Folder")
+				weaponsFolder.Name = "armas_AU"
+				weaponsFolder.Parent = ReplicatedStorage
+			end
+
+			local existingModel = nil
+			for _, item in ipairs(weaponsFolder:GetChildren()) do
+				if item:GetAttribute("JobID") == jobId then
+					existingModel = item
+					break
+				end
+			end
+
+			if not existingModel then
+				local loadOk, loadedModel = pcall(function()
+					return AssetService:LoadAssetAsync(assetId)
+				end)
+				if not loadOk or not loadedModel or not loadedModel:IsA("Model") then
+					warn("[Forge3D] Roblox asset load failed:", loadedModel)
+					sendStatus(player, "error", {message = "O modelo foi publicado, mas o Roblox não conseguiu carregá-lo no servidor.", asset_id = assetId, job_id = jobId})
+					return
+				end
+
+				loadedModel.Name = "Arma_" .. string.sub(jobId, 1, 8)
+				loadedModel:SetAttribute("UserID", player.UserId)
+				loadedModel:SetAttribute("JobID", jobId)
+				loadedModel:SetAttribute("AssetId", assetId)
+				loadedModel.Parent = weaponsFolder
+			end
+
 			sendStatus(player, "generated_package_ready", {
 				job_id = jobId,
-				message = "Modelo gerado. A etapa de publicação/importação como asset Roblox ainda precisa ser configurada.",
-				artifact_kinds = (function()
-					local kinds = {}
-					for _, artifact in ipairs(packageData.artifacts or {}) do
-						table.insert(kinds, artifact.kind)
-					end
-					return kinds
-				end)(),
+				asset_id = assetId,
+				message = "Arma publicada e salva em ReplicatedStorage > armas_AU."
 			})
 			return
 		elseif job.status == "failed" or job.status == "cancelled" then
