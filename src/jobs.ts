@@ -61,7 +61,7 @@ async function publishGlbToRoblox(
       const detail = uploadBody.error?.message ?? uploadBody.message ?? `HTTP ${uploadResponse.status}`;
       throw new Error(`Roblox Create Asset falhou: ${String(detail).slice(0, 350)}`);
     }
-    if (!uploadBody.path || !/^operations\\/[A-Za-z0-9_-]+$/.test(uploadBody.path)) {
+    if (!uploadBody.path || !/^operations\/[A-Za-z0-9_-]+$/.test(uploadBody.path)) {
       throw new Error("Roblox não retornou um caminho de operação válido.");
     }
     operationPath = uploadBody.path;
