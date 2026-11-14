@@ -20,7 +20,7 @@ export async function verifyForgeRequest(headers: Record<string, unknown>, rawBo
   if (Math.abs(Date.now() - millis) > 30_000) throw Object.assign(new Error("Timestamp expirado"), { statusCode: 401 });
   const secrets = [
     ...(keyId === config.FORGE_HMAC_KEY_ID && config.FORGE_HMAC_SECRET ? [config.FORGE_HMAC_SECRET] : []),
-    ...(config.FORGE_HMAC_SECRET_PREVIOUS ? [config.FORGE_HMAC_SECRET_PREVIOUS] : [])
+    ...(keyId === config.FORGE_HMAC_KEY_ID_PREVIOUS && config.FORGE_HMAC_SECRET_PREVIOUS ? [config.FORGE_HMAC_SECRET_PREVIOUS] : [])
   ];
   const payload = `${timestamp}.${nonce}.${rawBody}`;
   const valid = secrets.some(secret => safeEqual(createHmac("sha256", secret).update(payload).digest("hex"), signature));

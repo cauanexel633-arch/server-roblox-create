@@ -29,10 +29,10 @@ Não declare como concluídos recursos ainda não implementados. Rigging/skinnin
 
 1. Crie um projeto Supabase e configure as variáveis de ambiente da Vercel conforme `.env.example`.
 2. Aplique migrations em `supabase/migrations` no SQL Editor do Supabase.
-3. Crie os buckets privados listados na migration ou execute os comandos nela documentados.
+3. A migration cria o bucket privado `packages`. Cadastre cada universo autorizado no SQL Editor: `insert into public.forge_tenants(universe_id,name) values (SEU_UNIVERSE_ID,'Nome do jogo');`.
 4. Configure `CRON_SECRET`, `FORGE_HMAC_SECRET` e `OPENROUTER_API_KEY` como variáveis server-side na Vercel.
 5. Configure o segredo HMAC correspondente no servidor Roblox. Nunca coloque esse segredo em LocalScript ou ReplicatedStorage.
-6. Conecte o repositório à Vercel e faça deploy pela integração Git.
+6. Conecte o repositório à Vercel e faça deploy pela integração Git. O Cron foi deixado em execução diária para compatibilidade conservadora com Hobby; processamento frequente exige plano e configuração de Cron compatíveis, ou disparo autenticado do endpoint pelo servidor do jogo.
 
 ## Assinatura HMAC
 

@@ -36,7 +36,7 @@ select pgmq.create('forge_jobs_dlq');
 create or replace function public.forge_enqueue_job(p_job_id uuid,p_tenant_id uuid)
 returns bigint language plpgsql security definer set search_path=public,pgmq as $$
 declare v_msg bigint;
-begin select s into v_msg from pgmq.send('forge_jobs', jsonb_build_object('job_id',p_job_id,'tenant_id',p_tenant_id)) as s; return v_msg; end; $;
+begin select s into v_msg from pgmq.send('forge_jobs', jsonb_build_object('job_id',p_job_id,'tenant_id',p_tenant_id)) as s; return v_msg; end; $$;
 create or replace function public.forge_claim_jobs(p_qty integer default 1,p_visibility_seconds integer default 90)
 returns table(msg_id bigint,message jsonb) language sql security definer set search_path=public,pgmq as $$
   select r.msg_id,r.message from pgmq.read('forge_jobs',p_visibility_seconds,p_qty) r;
@@ -44,7 +44,7 @@ $$;
 create or replace function public.forge_ack_job(p_msg_id bigint)
 returns boolean language sql security definer set search_path=public,pgmq as $$ select pgmq.delete('forge_jobs',p_msg_id); $$;
 create or replace function public.forge_retry_job(p_msg_id bigint,p_delay_seconds integer default 30)
-returns void language plpgsql security definer set search_path=public,pgmq as $ begin perform pgmq.set_vt('forge_jobs',p_msg_id,p_delay_seconds); end; $;
+returns void language plpgsql security definer set search_path=public,pgmq as $ begin perform pgmq.set_vt('forge_jobs',p_msg_id,p_delay_seconds); end; $$;
 create or replace function public.forge_dlq_job(p_msg_id bigint,p_job_id uuid,p_tenant_id uuid,p_error text)
 returns bigint language plpgsql security definer set search_path=public,pgmq as $$
 declare v_msg bigint;
