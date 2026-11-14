@@ -11,6 +11,8 @@ const schema = z.object({
   FORGE_HMAC_SECRET_PREVIOUS: z.string().min(32).optional(),
   // Shared only by trusted Roblox server Scripts and the Forge3D API. Never expose to clients.
   FORGE_ROBLOX_TOKEN: z.string().min(32).optional(),
+  ROBLOX_OPEN_CLOUD_API_KEY: z.string().min(1).optional(),
+  ROBLOX_CREATOR_USER_ID: z.string().regex(/^\\d{1,20}$/).optional(),
   CRON_SECRET: z.string().min(24).optional(),
   APP_ENV: z.enum(["development", "preview", "production"]).default("production"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
