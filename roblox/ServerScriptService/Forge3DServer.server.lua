@@ -97,7 +97,17 @@ local function processWeaponRequest(player: Player, description: string)
 		sendStatus(player, "error", {message = "A API não retornou um identificador de geração."})
 		return
 	end
-	sendStatus(player, "queued", {job_id = jobId, message = "Solicitação recebida. Aguardando geração..."})
+	sendStatus(player, "queued", {job_id = jobId, message = "Solicitação recebida. Iniciando processamento..."})
+
+	-- Best-effort immediate queue tick. The scheduled Cron remains the fallback.
+	task.spawn(function()
+		local triggerOk, triggerError = pcall(function()
+			requestApi("POST", "/internal/process-queue")
+		end)
+		if not triggerOk then
+			warn("[Forge3D] immediate worker trigger failed; scheduled worker may process it:", triggerError)
+		end
+	end)
 
 	for attempt = 1, MAX_POLL_ATTEMPTS do
 		if player.Parent ~= Players then return end
