@@ -1,3 +1,0 @@
-# Usado apenas pelo Supabase CLI para aplicar migrations no projeto REMOTO
-# (supabase link + supabase db push). Nenhum serviço local é necessário.
-project_id = "nlvvsjmuttdyrzkbrxwm"

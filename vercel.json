@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["gru1"]
+  "regions": ["gru1"],
+  "functions": {
+    "src/index.ts": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/internal/process-queue", "schedule": "* * * * *" }
+  ]
 }
