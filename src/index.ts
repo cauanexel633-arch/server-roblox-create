@@ -81,17 +81,16 @@ app.post("/v1/generate",async(req,reply)=>{
 
   // Per-player hourly cap. Count only jobs created for this player in this universe.
   const since=new Date(Date.now()-60*60*1000).toISOString();
-  const {data:recent,error:rateError}=await db.from("forge_jobs").select("id,request")
-    .eq("tenant_id",tenant.id).gte("created_at",since);
+  const {count:playerJobCount,error:rateError}=await db.from("forge_jobs")
+    .select("id",{count:"exact",head:true})
+    .eq("tenant_id",tenant.id)
+    .contains("request",{player:{user_id:parsed.data.player.user_id}})
+    .gte("created_at",since);
   if(rateError) throw rateError;
-  const playerJobs=(recent??[]).filter(row=>{
-    const request=row.request as {player?:{user_id?:string}}|null;
-    return String(request?.player?.user_id??"")===parsed.data.player.user_id;
-  });
   const alreadyExists=await db.from("forge_jobs").select("id")
     .eq("tenant_id",tenant.id).eq("idempotency_key",parsed.data.idempotency_key).maybeSingle();
   if(alreadyExists.error) throw alreadyExists.error;
-  if(!alreadyExists.data && playerJobs.length>=config.MAX_PLAYER_JOBS_PER_HOUR) {
+  if(!alreadyExists.data && (playerJobCount??0)>=config.MAX_PLAYER_JOBS_PER_HOUR) {
     return reply.code(429).send({error:"player_rate_limit",limit:config.MAX_PLAYER_JOBS_PER_HOUR,window_seconds:3600});
   }
 
