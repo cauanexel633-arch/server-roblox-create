@@ -5,6 +5,6 @@
     "src/index.ts": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/internal/process-queue", "schedule": "* * * * *" }
+    { "path": "/api/internal/process-queue", "schedule": "0 12 * * *" }
   ]
 }

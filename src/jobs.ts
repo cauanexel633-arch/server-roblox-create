@@ -45,16 +45,25 @@ export async function processOneJob() {
     if(objError) throw new Error(`Upload OBJ: ${objError.message}`);
     const manifest={schema_version:"1.0",job_id,tenant_id,description,mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),limitations:["UV/PBR textures, rigging, keyframed animation and Roblox RBXMX are not generated in this release."]};
     const manifestPath=`${base}/manifest.json`;
-    await db.storage.from("packages").upload(manifestPath,Buffer.from(JSON.stringify(manifest,null,2)),{contentType:"application/json",upsert:true});
-    await db.from("forge_artifacts").insert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}]);
+    const {error:manifestError}=await db.storage.from("packages").upload(manifestPath,Buffer.from(JSON.stringify(manifest,null,2)),{contentType:"application/json",upsert:true});
+    if(manifestError) throw new Error(`Upload manifesto: ${manifestError.message}`);
+    const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
+    if(artifactError) throw new Error(`Persistência de artefatos: ${artifactError.message}`);
     await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S4",status:"completed",output:{triangles:mesh.triangleCount},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
     await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
     await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
     return true;
   } catch(error) {
     const message=error instanceof Error?error.message:"unknown";
-    await db.from("forge_jobs").update({status:"queued",last_error:message.slice(0,500),attempts:(1)}).eq("id",job_id).eq("tenant_id",tenant_id);
-    await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
+    const {data:state}=await db.from("forge_jobs").select("attempts").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
+    const attempts=Number(state?.attempts??0)+1;
+    if(attempts>=3){
+      await db.from("forge_jobs").update({status:"failed",attempts,last_error:message.slice(0,500),error_code:"max_attempts"}).eq("id",job_id).eq("tenant_id",tenant_id);
+      await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:message});
+    }else{
+      await db.from("forge_jobs").update({status:"queued",attempts,last_error:message.slice(0,500)}).eq("id",job_id).eq("tenant_id",tenant_id);
+      await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30*attempts});
+    }
     throw error;
   }
 }

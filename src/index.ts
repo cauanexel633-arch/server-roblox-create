@@ -23,7 +23,7 @@ const generateSchema=z.object({
   constraints:z.object({max_tris:z.number().int().min(100).max(50000).default(18000),rarity:z.string().max(32).optional(),quality:z.enum(["low","medium","high","ultra","cinematic"]).default("high")}).default({}),
   idempotency_key:z.string().uuid()
 });
-async function authenticate(req: typeof app extends never ? never : import("fastify").FastifyRequest) {
+async function authenticate(req: import("fastify").FastifyRequest) {
   const raw=(req as typeof req & {rawBody?:string}).rawBody??"";
   await verifyForgeRequest(req.headers as Record<string,unknown>,raw);
 }
@@ -72,18 +72,19 @@ app.get("/v1/weapons/:id/package",async(req,reply)=>{
   }));
   return {job_id:id,artifacts};
 });
-app.post("/api/internal/process-queue",async(req,reply)=>{
+const processQueue=async(req:import("fastify").FastifyRequest,reply:import("fastify").FastifyReply)=>{
   const auth=String(req.headers.authorization??"");
   if(!config.CRON_SECRET||auth!==`Bearer ${config.CRON_SECRET}`) return reply.code(401).send({error:"unauthorized"});
   let processed=0;
   for(let i=0;i<config.MAX_JOB_STAGES_PER_TICK;i++){const did=await processOneJob();if(!did)break;processed++;}
   return {processed};
-});
+};
+app.get("/api/internal/process-queue",processQueue);
+app.post("/api/internal/process-queue",processQueue);
 app.setErrorHandler((error,req,reply)=>{
   req.log.error({err:error},"request_failed");
   const status=Number((error as {statusCode?:number}).statusCode??500);
   return reply.code(status>=400&&status<600?status:500).send({error:status>=500?"internal_error":"request_error",message:status>=500?"Falha interna":error.message,trace_id:req.id});
 });
-// Mantém o mesmo entrypoint compatível com execução local e o adaptador Fastify da Vercel.
 if (process.env.VERCEL !== "1") app.listen({port:Number(process.env.PORT??3000)});
 export default app;
