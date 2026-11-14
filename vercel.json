@@ -11,6 +11,6 @@
     }
   ],
   "crons": [
-    { "path": "/internal/process-queue", "schedule": "0 12 * * *" }
+    { "path": "/internal/process-queue", "schedule": "*/5 * * * *" }
   ]
 }
