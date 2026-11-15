@@ -27,77 +27,58 @@ create or replace function public.forge_acquire_worker(
   p_max_slots integer default 3
 )
 returns boolean
-language plpgsql
+language sql
 security definer
 set search_path = public
-as $$
-declare
-  v_slot_id smallint;
-begin
-  if p_worker_token is null then
-    raise exception 'worker token is required';
-  end if;
-
-  select slot_id into v_slot_id
+as 'with candidate as (
+  select slot_id
   from public.forge_worker_slots
   where slot_id <= greatest(1, least(coalesce(p_max_slots, 3), 10))
     and (worker_token is null or lease_until <= now())
   order by slot_id
   for update skip locked
-  limit 1;
-
-  if v_slot_id is null then
-    return false;
-  end if;
-
-  update public.forge_worker_slots
+  limit 1
+),
+claimed as (
+  update public.forge_worker_slots slots
   set worker_token = p_worker_token,
       lease_until = now() + make_interval(secs => greatest(30, least(coalesce(p_lease_seconds, 120), 300))),
       updated_at = now()
-  where slot_id = v_slot_id;
-
-  return true;
-end;
-$$;
+  from candidate
+  where slots.slot_id = candidate.slot_id
+  returning true as acquired
+)
+select coalesce((select acquired from claimed limit 1), false)';
 
 create or replace function public.forge_renew_worker(
   p_worker_token uuid,
   p_lease_seconds integer default 120
 )
 returns boolean
-language plpgsql
+language sql
 security definer
 set search_path = public
-as $
-declare
-  v_rows integer;
-begin
+as 'with renewed as (
   update public.forge_worker_slots
   set lease_until = now() + make_interval(secs => greatest(30, least(coalesce(p_lease_seconds, 120), 300))),
       updated_at = now()
-  where worker_token = p_worker_token
-    and lease_until > now();
-  get diagnostics v_rows = row_count;
-  return v_rows > 0;
-end;
-$;
+  where worker_token = p_worker_token and lease_until > now()
+  returning true as renewed
+)
+select coalesce((select renewed from renewed limit 1), false)';
 
 create or replace function public.forge_release_worker(p_worker_token uuid)
 returns boolean
-language plpgsql
+language sql
 security definer
 set search_path = public
-as $$
-declare
-  v_rows integer;
-begin
+as 'with released as (
   update public.forge_worker_slots
   set worker_token = null, lease_until = null, updated_at = now()
-  where worker_token = p_worker_token;
-  get diagnostics v_rows = row_count;
-  return v_rows > 0;
-end;
-$$;
+  where worker_token = p_worker_token
+  returning true as released
+)
+select coalesce((select released from released limit 1), false)';
 
 revoke all on function public.forge_acquire_worker(uuid, integer, integer) from public, anon, authenticated;
 revoke all on function public.forge_renew_worker(uuid, integer) from public, anon, authenticated;
