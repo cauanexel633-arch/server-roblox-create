@@ -132,7 +132,7 @@ app.post("/v1/generate",async(req,reply)=>{
 
 const mapCompileSchema=z.object({
   universe_id:z.number().int().positive(),
-  user_id:z.string().regex(/^\\d{1,20}$/),
+  user_id:z.string().regex(/^\d{1,20}$/),
   description:z.string().trim().min(12).max(2000)
 });
 
