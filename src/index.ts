@@ -3,7 +3,7 @@ import { z } from "zod";
 import { config, hasSupabase } from "./config.js";
 import { requireDatabase } from "./db.js";
 import { verifyForgeRequest, verifyRobloxToken } from "./security.js";
-import { createJob, processOneJob } from "./jobs.js";
+import { createJob, runQueueWorker } from "./jobs.js";
 
 const app=Fastify({
   logger:{level:config.LOG_LEVEL,redact:{paths:["req.headers.authorization","req.headers.x-forge-token","req.headers.x-forge-signature","req.headers.x-forge-nonce"],censor:"[REDACTED]"}},
@@ -178,9 +178,12 @@ const processQueue=async(req:import("fastify").FastifyRequest,reply:import("fast
   const cronAuthorized=Boolean(config.CRON_SECRET && auth===`Bearer ${config.CRON_SECRET}`);
   const robloxAuthorized=verifyRobloxToken(req.headers as Record<string,unknown>);
   if(!cronAuthorized&&!robloxAuthorized) return reply.code(401).send({error:"unauthorized"});
-  let processed=0;
-  for(let i=0;i<config.MAX_JOB_STAGES_PER_TICK;i++){const did=await processOneJob();if(!did)break;processed++;}
-  return {processed};
+  const result = await runQueueWorker();
+  return {
+    processed: result.processed,
+    busy: !result.acquired,
+    exhausted: result.exhausted
+  };
 };
 app.get("/internal/process-queue",processQueue);
 app.post("/internal/process-queue",processQueue);

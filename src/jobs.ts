@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { createSwordMesh, meshToObj } from "./geometry.js";
 import { meshToGlb } from "./glb.js";
 import { runAgent } from "./agents.js";
+import { runWorkerBatch } from "./worker-pool.js";
 
 type RobloxOperation = {
   path?: string;
@@ -106,7 +107,7 @@ export async function createJob(tenantId: string, payload: Record<string, unknow
 
 export async function processOneJob() {
   const db=requireDatabase();
-  const {data:messages,error}=await db.rpc("forge_claim_jobs",{p_qty:1,p_visibility_seconds:90});
+  const {data:messages,error}=await db.rpc("forge_claim_jobs",{p_qty:1,p_visibility_seconds:180});
   if(error) throw new Error(`Falha ao consumir fila: ${error.message}`);
   const msg=messages?.[0] as {msg_id:number;message:{job_id:string;tenant_id:string}}|undefined;
   if(!msg) return false;
@@ -182,9 +183,35 @@ export async function processOneJob() {
       await db.from("forge_jobs").update({status:"queued",attempts,last_error:message.slice(0,500)}).eq("id",job_id).eq("tenant_id",tenant_id);
       await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30*attempts});
     }
-    throw error;
+    return true;
   }
 }
+
+export async function runQueueWorker() {
+  const db = requireDatabase();
+  return runWorkerBatch({
+    acquire: async (workerToken, leaseSeconds, maxSlots) => {
+      const { data, error } = await db.rpc("forge_acquire_worker", {
+        p_worker_token: workerToken,
+        p_lease_seconds: leaseSeconds,
+        p_max_slots: maxSlots
+      });
+      if (error) throw new Error(`Falha ao adquirir worker slot: ${error.message}`);
+      return data === true;
+    },
+    release: async (workerToken) => {
+      const { error } = await db.rpc("forge_release_worker", { p_worker_token: workerToken });
+      if (error) throw new Error(`Falha ao liberar worker slot: ${error.message}`);
+    },
+    processOne: processOneJob
+  }, {
+    maxConcurrentJobs: config.MAX_CONCURRENT_JOBS,
+    maxJobs: config.MAX_JOBS_PER_WORKER_TICK,
+    leaseSeconds: 120,
+    budgetMs: 50_000
+  });
+}
+
 function safeJson(value:string) {
   try { return JSON.parse(value) as unknown; } catch { return {raw:value}; }
 }
