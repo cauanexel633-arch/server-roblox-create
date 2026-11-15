@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches: ["main", "feat/roblox-player-integration"]
+    branches: ["main", "feat/roblox-player-integration", "feat/dynamic-weapon-geometry", "fix/job-failure-recovery"]
   pull_request:
-    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -14,7 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
