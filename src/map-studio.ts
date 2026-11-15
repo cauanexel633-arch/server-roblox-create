@@ -1,4 +1,5 @@
 import { runAgent } from "./agents.js";
+import { searchMapReferences } from "./map-reference-search.js";
 
 type Vec3 = [number, number, number];
 type JsonObject = Record<string, unknown>;
@@ -15,7 +16,7 @@ export type MapStudioPlan = {
   materials:Array<{id:string;material:string;color:Vec3;roughness:number;metalness:number;region_id:string}>;
   palette:{primary:Vec3;secondary:Vec3;accent:Vec3;ground:Vec3;barrier:Vec3};
   colliders:MapCollider[];
-  references:{search_queries:string[];candidates:Array<{url:string;title:string;reason:string}>;status:"unverified_candidates"};
+  references:{search_queries:string[];candidates:Array<{url:string;title:string;reason:string}>;status:"search_results"|"unverified_candidates"|"unavailable"};
   review:{approved:boolean;findings:string[];performance_budget:{max_parts:number;max_triangles:number}};
   safety:{closed_perimeter:true;minimum_barrier_height:24;barriers_anchored:true;barriers_collidable:true;reject_if_boundary_incomplete:true};
   limitations:string[];
@@ -59,14 +60,14 @@ export async function buildMapStudioPlan(description:string):Promise<MapStudioPl
   const [interpretation,references,architecture,elements,modeling,texturing,palette,collisions,review]=await Promise.all([
     runAgent("MapInterpreter",input),runAgent("MapReferenceScout",input),runAgent("MapArchitect",input),runAgent("MapElementPlanner",input),runAgent("MapModeler3D",input),runAgent("MapTexturizer",input),runAgent("MapPaletteDirector",input),runAgent("MapCollider3D",input),runAgent("MapReviewer",input)
   ]);
-  const i=parse(interpretation),r=parse(references),a=parse(architecture),e=parse(elements),m=parse(modeling),t=parse(texturing),p=parse(palette),c=parse(collisions),v=parse(review);
+  const i=parse(interpretation),r=parse(references),a=parse(architecture),e=parse(elements),m=parse(modeling),t=parse(texturing),p=parse(palette),c=parse(collisions),v=parse(review);\n  const searchQueries=list(r.search_queries,8).filter((x):x is string=>typeof x==="string").map(x=>x.slice(0,120));\n  const onlineReferences=await searchMapReferences(searchQueries.length?searchQueries:[`Roblox ${text(i.genre,"game")} ${text(i.biome,"map")} level design 3D environment reference`]);
   const scale=object(i.scale),width=number(scale.width,512,128,4096),depth=number(scale.depth,512,128,4096),minY=number(scale.bounds_min_y,0,-500,500),maxY=number(scale.bounds_max_y,256,minY+64,2000);
   const rawPalette=object(p.palette);
   const regions=list(a.regions,24).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`region_${n+1}`),name:text(o.name,`Região ${n+1}`),kind:text(o.kind,"zone"),center:vec(o.center,[0,0,0]),size:vec(o.size,[64,32,64],width)};});
   const rawElements=list(e.elements,200).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`element_${n+1}`),kind:text(o.kind,"prop"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],256),material:text(o.material,"Plastic"),region_id:safeId(o.region_id,"central")};}).filter(x=>validInside(x.position,x.size,width,depth));
   const models=list(m.models,120).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`model_${n+1}`),kind:text(o.kind,"modular_mesh"),position:vec(o.position,[0,0,0]),size:vec(o.size,[8,8,8],512),complexity:number(o.complexity,100,1,100000)};}).filter(x=>validInside(x.position,x.size,width,depth));
   const materials=list(t.materials,64).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`material_${n+1}`),material:text(o.material,"Concrete"),color:rgb(o.color,[0.5,0.5,0.5]),roughness:number(o.roughness,0.8,0,1),metalness:number(o.metalness,0,0,1),region_id:safeId(o.region_id,"central")};});
-  const candidateRefs=list(r.references,5).flatMap(x=>{const o=object(x),url=safeHttps(o.url);return url?[{url,title:text(o.title,"Visual reference"),reason:text(o.reason,"Inspiration visual")}]:[];});
+  const agentRefs=list(r.references,5).flatMap(x=>{const o=object(x),url=safeHttps(o.url);return url?[{url,title:text(o.title,"Visual reference"),reason:text(o.reason,"Inspiration visual")}]:[];});\n  const candidateRefs=[...onlineReferences.results,...agentRefs.filter(x=>!onlineReferences.results.some(y=>y.url===x.url))].slice(0,10);
   const colliders=[...boundary(width,depth,minY),...list(c.colliders,300).flatMap((x,n)=>{const o=object(x);if(o.kind==="mandatory_perimeter_barrier")return[];return[{id:safeId(o.id,`collider_${n+1}`),kind:text(o.kind,"prop_collider"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],512),anchored:true as const,can_collide:true as const,required:false}];})];
   const rawSpawns=list(a.spawns,16).map(x=>vec(x,[0,4,0])).filter(x=>Math.abs(x[0])<=width/2-8&&Math.abs(x[2])<=depth/2-8);
   const plan:MapStudioPlan={
@@ -78,10 +79,10 @@ export async function buildMapStudioPlan(description:string):Promise<MapStudioPl
     elements:rawElements,models,materials,
     palette:{primary:rgb(rawPalette.primary,[0.12,0.16,0.22]),secondary:rgb(rawPalette.secondary,[0.25,0.3,0.36]),accent:rgb(rawPalette.accent,[0.95,0.55,0.18]),ground:rgb(rawPalette.ground,[0.3,0.34,0.28]),barrier:rgb(rawPalette.barrier,[0.85,0.18,0.15])},
     colliders,
-    references:{search_queries:list(r.search_queries,8).filter((x):x is string=>typeof x==="string").map(x=>x.slice(0,120)),candidates:candidateRefs,status:"unverified_candidates"},
+    references:{search_queries:searchQueries,candidates:candidateRefs,status:onlineReferences.status==="search_results"?"search_results":candidateRefs.length?"unverified_candidates":"unavailable"},
     review:{approved:v.approved===true,findings:list(v.findings,20).filter((x):x is string=>typeof x==="string").map(x=>x.slice(0,240)),performance_budget:{max_parts:Math.round(number(object(v.performance_budget).max_parts,5000,100,50000)),max_triangles:Math.round(number(object(v.performance_budget).max_triangles,200000,1000,2000000))}},
     safety:{closed_perimeter:true,minimum_barrier_height:24,barriers_anchored:true,barriers_collidable:true,reject_if_boundary_incomplete:true},
-    limitations:["Este módulo gera um plano de mapa estruturado; a conversão em modelos Roblox/meshes e publicação do mapa é uma etapa de execução separada.","Referências online são candidatas HTTPS fornecidas pelo agente; ainda precisam ser buscadas e verificadas por um conector de pesquisa antes de serem tratadas como fontes confirmadas.","Barreiras são inseridas deterministicamente e validadas pelo servidor, independentemente da saída dos agentes."]
+    limitations:["Este módulo gera um plano de mapa estruturado; a conversão em modelos Roblox/meshes e publicação do mapa é uma etapa de execução separada.","Busca online real de referências usa Tavily quando TAVILY_API_KEY está configurada; sem a chave, o sistema mantém apenas candidatos não verificados do agente.","Barreiras são inseridas deterministicamente e validadas pelo servidor, independentemente da saída dos agentes."]
   };
   const validation=validateMapStudioPlan(plan);
   if(!validation.valid)throw new Error(`Map Studio rejeitou o plano: ${validation.errors.join(" ")}`);
