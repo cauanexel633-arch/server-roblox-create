@@ -65,17 +65,22 @@ create or replace function public.forge_renew_worker(
   p_lease_seconds integer default 120
 )
 returns boolean
-language sql
+language plpgsql
 security definer
 set search_path = public
-as $$
+as $
+declare
+  v_rows integer;
+begin
   update public.forge_worker_slots
   set lease_until = now() + make_interval(secs => greatest(30, least(coalesce(p_lease_seconds, 120), 300))),
       updated_at = now()
   where worker_token = p_worker_token
-    and lease_until > now()
-  returning true;
-$$;
+    and lease_until > now();
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$;
 
 create or replace function public.forge_release_worker(p_worker_token uuid)
 returns boolean
