@@ -70,12 +70,13 @@ function shouldTryNextModel(error: unknown): boolean {
   const modelSpecific = /agentic harness|only available on|not available on|unsupported model|model not found|no endpoint|provider.*(?:unavailable|not found)|does not support/.test(message);
 
   if (modelSpecific) return true;
-  if (status === 400 || status === 403 || status === 404 || status === 408 ||
+  // Some upstream model providers return 401 when their own route rejects
+  // authentication. Try another catalog candidate; a gateway-wide bad key will
+  // still fail all attempts and the final error will be surfaced to the caller.
+  if (status === 400 || status === 401 || status === 403 || status === 404 || status === 408 ||
       status === 409 || status === 425 || status === 429 || (status !== undefined && status >= 500)) {
     return true;
   }
-  // Authentication failures and other permanent client errors are not fixed
-  // by changing models (e.g. an invalid OpenRouter API key).
   // Network/transport errors often have no HTTP status; give another provider a chance.
   return status === undefined;
 }
