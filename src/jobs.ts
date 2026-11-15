@@ -140,7 +140,7 @@ export async function processOneJob() {
     }
     const visualSpec = parseWeaponSpec(description, intent);
     const mesh=createSwordMesh(config.MAX_TRIANGLES, visualSpec);
-    const glb=meshToGlb(mesh);
+    const glb=meshToGlb(mesh, visualSpec);
     const obj=meshToObj(mesh);
     const base=`${tenant_id}/${job_id}`;
     const glbPath=`${base}/weapon.glb`,objPath=`${base}/weapon.obj`;
