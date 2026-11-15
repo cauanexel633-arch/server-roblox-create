@@ -1,7 +1,7 @@
 --!strict
 -- Place in ServerScriptService as Forge3DServer.server.lua.
 -- Configure the experience Secret named FORGE3D_API_TOKEN and allow
--- https://server-roblox-create.vercel.app in Game Settings > Security.
+-- https://server-roblox-create-v6if.vercel.app in Game Settings > Security.
 -- Never put this token in a LocalScript, ReplicatedStorage, or client request.
 
 local HttpService = game:GetService("HttpService")
@@ -9,7 +9,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AssetService = game:GetService("AssetService")
 
-local API_BASE = "https://server-roblox-create.vercel.app"
+local API_BASE = "https://server-roblox-create-v6if.vercel.app"
 local UNIVERSE_ID = 10776153543
 local MAX_DESCRIPTION_LENGTH = 1000
 local MAX_MAP_DESCRIPTION_LENGTH = 2000
