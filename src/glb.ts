@@ -1,7 +1,8 @@
 import type { MeshData } from "./geometry.js";
+import type { WeaponVisualSpec } from "./weapon-spec.js";
 
 const align4=(n:number)=>Math.ceil(n/4)*4;
-export function meshToGlb(mesh: MeshData): Uint8Array {
+export function meshToGlb(mesh: MeshData, visual?: WeaponVisualSpec): Uint8Array {
   const count=mesh.positions.length/3;
   const posBytes=Buffer.from(new Float32Array(mesh.positions).buffer);
   const colorBytes=Buffer.from(new Float32Array(mesh.colors).buffer);
@@ -23,7 +24,7 @@ export function meshToGlb(mesh: MeshData): Uint8Array {
     asset:{version:"2.0",generator:"Forge3D Cloud"},
     scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0,name:"WeaponModel"}],
     meshes:[{name:"GeneratedWeapon",primitives:[{attributes:{POSITION:0,COLOR_0:1},indices:2,material:0,mode:4}]}],
-    materials:[{name:"WeaponMaterial",pbrMetallicRoughness:{baseColorFactor:[1,1,1,1],metallicFactor:0.55,roughnessFactor:0.3},emissiveFactor:[0.16,0.16,0.16]}],
+    materials:[{name:"WeaponMaterial",pbrMetallicRoughness:{baseColorFactor:[1,1,1,1],metallicFactor:0.55,roughnessFactor:0.3},emissiveFactor:visual?.palette.emissive ?? [0.16,0.16,0.16]}],
     buffers:[{byteLength:binaryLength}],
     bufferViews:[
       {buffer:0,byteOffset:0,byteLength:posBytes.length,target:34962},
