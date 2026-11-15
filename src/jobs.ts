@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { requireDatabase } from "./db.js";
 import { config } from "./config.js";
-import { createSwordMesh, meshToObj } from "./geometry.js";
+import { createWeaponMesh, meshToObj } from "./geometry.js";
 import { meshToGlb } from "./glb.js";
 import { runAgent } from "./agents.js";
 import { runWorkerBatch } from "./worker-pool.js";
@@ -139,7 +139,7 @@ export async function processOneJob() {
       console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
     }
     const visualSpec = parseWeaponSpec(description, intent);
-    const mesh=createSwordMesh(config.MAX_TRIANGLES, visualSpec);
+    const mesh=createWeaponMesh(config.MAX_TRIANGLES, visualSpec);
     const glb=meshToGlb(mesh, visualSpec);
     const obj=meshToObj(mesh);
     const base=`${tenant_id}/${job_id}`;
