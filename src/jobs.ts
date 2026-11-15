@@ -170,7 +170,7 @@ export async function processOneJob() {
     const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
     if(artifactError) throw new Error(`Persistência de artefatos: ${artifactError.message}`);
     await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S4",status:"completed",output:{triangles:mesh.triangleCount},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
-    await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec.effects},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+    await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
     await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
     return true;
   } catch(error) {
