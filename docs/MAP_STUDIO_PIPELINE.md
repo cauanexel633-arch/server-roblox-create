@@ -28,7 +28,7 @@ The server deterministically inserts four full-length boundary walls (north, sou
 - The validator rejects a plan if any required wall is missing, non-collidable, unanchored or too short.
 - Spawn points and generated elements are kept inside the playable bounds.
 
-A later runtime stage should also add an out-of-bounds recovery volume/teleport as defense in depth. Perimeter barriers are the primary physical containment, not a substitute for server-side character recovery.
+The compiled package also includes a server-side character recovery script as defense in depth. Perimeter barriers remain the primary physical containment.
 
 ## Output and native Roblox compilation
 
