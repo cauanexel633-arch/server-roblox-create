@@ -7,6 +7,20 @@ import { runAgent } from "./agents.js";
 import { runWorkerBatch } from "./worker-pool.js";
 import { parseWeaponSpec } from "./weapon-spec.js";
 
+const MAX_JOB_AGE_MS = 10 * 60 * 1000;
+const MAX_JOB_ATTEMPTS = 3;
+
+function classifyJobError(error: unknown): { retryable: boolean; code: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = Number(message.match(/(?:HTTP\\s*|status\\s*)(\\d{3})/i)?.[1] ?? 0);
+  if (status === 429) return { retryable: true, code: "provider_rate_limited" };
+  if (status === 408 || status === 425 || status >= 500) return { retryable: true, code: "upstream_unavailable" };
+  if (/timeout|timed out|aborted|ECONNRESET|ECONNREFUSED|EAI_AGAIN|fetch failed|network/i.test(message)) {
+    return { retryable: true, code: "temporary_network_error" };
+  }
+  return { retryable: false, code: "generation_failed" };
+}
+
 type RobloxOperation = {
   path?: string;
   done?: boolean;
