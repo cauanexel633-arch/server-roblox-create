@@ -32,7 +32,7 @@ function unwrapAgentResult(raw: string): Record<string, unknown> {
     for (let depth = 0; depth < 3; depth++) {
       if (!isRecord(parsed)) return {};
       if (typeof parsed.result === "string") {
-        try { parsed = JSON.parse(parsed.result); continue; } catch { return parsed; }
+        try { parsed = JSON.parse(parsed.result); continue; } catch { return isRecord(parsed) ? parsed : {}; }
       }
       if (isRecord(parsed.result)) { parsed = parsed.result; continue; }
       return parsed;
