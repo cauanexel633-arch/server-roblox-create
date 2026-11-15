@@ -121,7 +121,9 @@ export async function processOneJob() {
     const {data:job,error:readError}=await db.from("forge_jobs").select("*").eq("id",job_id).eq("tenant_id",tenant_id).single();
     if(readError||!job) throw new Error("Job não encontrado");
     if(job.status==="cancelled"||job.status==="completed"||job.status==="failed") {
-      await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id}); return true;
+      const {error:terminalAckError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
+      if(terminalAckError) throw new Error("Falha ao confirmar remoção de job terminal: " + terminalAckError.message);
+      return true;
     }
     const createdAt = new Date(job.created_at).getTime();
     if (!Number.isFinite(createdAt) || Date.now() - createdAt > MAX_JOB_AGE_MS) {
@@ -192,8 +194,21 @@ export async function processOneJob() {
     const message=error instanceof Error?error.message:"unknown";
     const failure=classifyJobError(error);
     console.error("[Forge3D] job processing error", {job_id,code:failure.code,message});
-    const {data:state}=await db.from("forge_jobs").select("attempts,created_at").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
-    const attempts=Number(state?.attempts??0)+1;
+    const {data:state,error:stateReadError}=await db.from("forge_jobs").select("attempts,created_at,status").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
+    if(stateReadError || !state) {
+      console.error("[Forge3D] could not read job state after processing error",{job_id,error:stateReadError?.message});
+      const {error:requeueError}=await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
+      if(requeueError) console.error("[Forge3D] failed to requeue job after state read error",{job_id,error:requeueError.message});
+      return true;
+    }
+    // A queue-ack failure after a successful DB completion must never turn a
+    // successfully published weapon into a failed job. Retry only queue cleanup.
+    if(["completed","cancelled","failed"].includes(String(state.status))) {
+      const {error:terminalAckError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
+      if(terminalAckError) console.error("[Forge3D] terminal job queue acknowledgement failed; visibility timeout will retry cleanup",{job_id,error:terminalAckError.message});
+      return true;
+    }
+    const attempts=Number(state.attempts??0)+1;
     const createdAt=new Date(state?.created_at??0).getTime();
     const expired=!Number.isFinite(createdAt)||Date.now()-createdAt>=MAX_JOB_AGE_MS;
     const terminal=!failure.retryable||attempts>=MAX_JOB_ATTEMPTS||expired;
