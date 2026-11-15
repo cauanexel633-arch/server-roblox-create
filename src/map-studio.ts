@@ -37,8 +37,7 @@ function boundary(width:number,depth:number,minY:number):MapCollider[]{
     {id:"safety_wall_north",kind:"mandatory_perimeter_barrier",position:[0,centerY,-depth/2],size:[width+thickness*2,height,thickness],anchored:true,can_collide:true,required:true},
     {id:"safety_wall_south",kind:"mandatory_perimeter_barrier",position:[0,centerY,depth/2],size:[width+thickness*2,height,thickness],anchored:true,can_collide:true,required:true},
     {id:"safety_wall_west",kind:"mandatory_perimeter_barrier",position:[-width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true},
-    {id:"safety_wall_east",kind:"mandatory_perimeter_barrier",position:[width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true}
-  ];
+    {id:"safety_wall_east",kind:"mandatory_perimeter_barrier",position:[width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true},\n    {id:"safety_recovery_floor",kind:"safety_recovery_floor",position:[0,minY-80,0],size:[width+512,8,depth+512],anchored:true,can_collide:true,required:true}\n  ];
 }
 function validInside(position:Vec3,size:Vec3,width:number,depth:number):boolean{return Math.abs(position[0])+size[0]/2<=width/2&&Math.abs(position[2])+size[2]/2<=depth/2;}
 export function validateMapStudioPlan(plan:MapStudioPlan):{valid:boolean;errors:string[]}{
@@ -46,7 +45,7 @@ export function validateMapStudioPlan(plan:MapStudioPlan):{valid:boolean;errors:
   if(plan.colliders.filter(c=>c.required&&c.kind==="mandatory_perimeter_barrier").length!==4)errors.push("O mapa precisa ter exatamente quatro barreiras obrigatórias no perímetro.");
   const ids=new Set(plan.colliders.map(c=>c.id));
   for(const id of ["safety_wall_north","safety_wall_south","safety_wall_east","safety_wall_west"])if(!ids.has(id))errors.push(`Barreira obrigatória ausente: ${id}`);
-  for(const c of plan.colliders.filter(x=>x.required)){if(!c.anchored)errors.push(`Barreira ${c.id} não está ancorada.`);if(!c.can_collide)errors.push(`Barreira ${c.id} não possui colisão.`);if(c.size[1]<24)errors.push(`Barreira ${c.id} tem altura inferior a 24 studs.`);}
+  for(const c of plan.colliders.filter(x=>x.required)){if(!c.anchored)errors.push(`Colisor obrigatório ${c.id} não está ancorado.`);if(!c.can_collide)errors.push(`Colisor obrigatório ${c.id} não possui colisão.`);if(c.kind==="mandatory_perimeter_barrier"&&c.size[1]<24)errors.push(`Barreira ${c.id} tem altura inferior a 24 studs.`);}\n  if(!ids.has("safety_recovery_floor"))errors.push("Piso de recuperação anti-queda ausente.");
   for(const e of plan.elements)if(!validInside(e.position,e.size,plan.bounds.width,plan.bounds.depth))errors.push(`Elemento ${e.id} ultrapassa os limites jogáveis.`);
   for(const m of plan.models)if(!validInside(m.position,m.size,plan.bounds.width,plan.bounds.depth))errors.push(`Modelo ${m.id} ultrapassa os limites jogáveis.`);
   if(plan.spawns.some(p=>Math.abs(p[0])>plan.bounds.width/2-8||Math.abs(p[2])>plan.bounds.depth/2-8))errors.push("Existe ponto de spawn muito próximo ou fora do perímetro.");
