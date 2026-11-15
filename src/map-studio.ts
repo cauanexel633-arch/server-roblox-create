@@ -73,7 +73,7 @@ export async function buildMapStudioPlan(description:string):Promise<MapStudioPl
   const materials=list(t.materials,64).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`material_${n+1}`),material:text(o.material,"Concrete"),color:rgb(o.color,[0.5,0.5,0.5]),roughness:number(o.roughness,0.8,0,1),metalness:number(o.metalness,0,0,1),region_id:safeId(o.region_id,"central")};});
   const agentRefs=list(r.references,5).flatMap(x=>{const o=object(x),url=safeHttps(o.url);return url?[{url,title:text(o.title,"Visual reference"),reason:text(o.reason,"Inspiration visual")}]:[];});
   const candidateRefs=[...onlineReferences.results,...agentRefs.filter(x=>!onlineReferences.results.some(y=>y.url===x.url))].slice(0,10);
-  const colliders=[...boundary(width,depth,minY),...list(c.colliders,300).flatMap((x,n)=>{const o=object(x);if(o.kind==="mandatory_perimeter_barrier")return[];return[{id:safeId(o.id,`collider_${n+1}`),kind:text(o.kind,"prop_collider"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],512),anchored:true as const,can_collide:true as const,required:false as const}];})];
+  const colliders=[...boundary(width,depth,minY),...list(c.colliders,300).flatMap((x,n)=>{const o=object(x);if(o.kind==="mandatory_perimeter_barrier")return[];return[{id:safeId(o.id,`collider_${n+1}`),kind:text(o.kind,"prop_collider"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],512),anchored:true as const,can_collide:true as const,required:false}];})];
   const rawSpawns=list(a.spawns,16).map(x=>vec(x,[0,4,0])).filter(x=>Math.abs(x[0])<=width/2-8&&Math.abs(x[2])<=depth/2-8);
   const plan:MapStudioPlan={
     schema_version:"1.0",system:"Forge3DMapStudio",theme:text(i.theme,"Fantasy"),genre:text(i.genre,"PvP"),biome:text(i.biome,"Temperate"),
