@@ -16,4 +16,5 @@ describe("Forge3D Map Studio",()=>{
  it("rejects a missing boundary wall",async()=>{const p=await buildMapStudioPlan("Arena");p.colliders=p.colliders.filter(c=>c.id!=="safety_wall_north");expect(validateMapStudioPlan(p).valid).toBe(false);});
  it("rejects non-HTTPS and local reference URLs",async()=>{const p=await buildMapStudioPlan("Arena");expect(p.references.candidates).toHaveLength(1);});
  it("filters models outside playable bounds",async()=>{const p=await buildMapStudioPlan("Arena");expect(p.models.every(m=>Math.abs(m.position[0])+m.size[0]/2<=p.bounds.width/2)).toBe(true);});
+ it("compiles native Roblox builder and server recovery scripts",async()=>{const p=await buildMapStudioPlan("Arena");const pkg=compileMapStudioPackage(p);expect(pkg.builder_luau).toContain("Workspace.Terrain");expect(pkg.builder_luau).toContain("mandatory_perimeter_barrier");expect(pkg.recovery_luau).toContain("RunService.Heartbeat");expect(pkg.manifest.files).toContain("Forge3D_BoundaryRecovery.server.lua");});
 });
