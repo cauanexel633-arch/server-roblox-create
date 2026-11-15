@@ -144,6 +144,7 @@ export async function freeModels(signal?: AbortSignal): Promise<Model[]> {
 }
 
 export async function completeAgent(systemPrompt: string, input: unknown): Promise<string> {
+  const apiKey = config.OPENROUTER_API_KEY?.trim() ?? "";
   const budgetSignal = AbortSignal.timeout(AGENT_BUDGET_MS);
   const models = await freeModels(budgetSignal);
   if (!models.length) {
