@@ -17,6 +17,8 @@ type Model = {
 
 let catalogCache: { at: number; models: Model[] } | undefined;
 let modelCursor = 0;
+let credentialValidatedAt = 0;
+let loggedOpenRouterTransport = false;
 
 // Keep enough execution time for geometry export, storage and Roblox publication.
 const AGENT_BUDGET_MS = 20_000;
@@ -81,10 +83,33 @@ function shouldTryNextModel(error: unknown): boolean {
   return status === undefined;
 }
 
+async function validateOpenRouterCredential(apiKey: string, signal?: AbortSignal): Promise<void> {
+  if (credentialValidatedAt && Date.now() - credentialValidatedAt < 300_000) return;
+  const response = await fetch(new URL(`${config.OPENROUTER_BASE_URL}/key`), {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(CATALOG_TIMEOUT_MS)]) : AbortSignal.timeout(CATALOG_TIMEOUT_MS)
+  });
+  if (!response.ok) {
+    console.error("[Forge3D] OpenRouter credential validation failed", {
+      status: response.status,
+      authorizationHeaderSent: true,
+      keyConfigured: apiKey.length > 0
+    });
+    throw Object.assign(new Error(`OPENROUTER_API_KEY rejeitada pelo endpoint autenticado /key: HTTP ${response.status}`), { statusCode: response.status });
+  }
+  credentialValidatedAt = Date.now();
+  console.info("[Forge3D] OpenRouter credential validated", { status: response.status });
+}
+
 export async function freeModels(signal?: AbortSignal): Promise<Model[]> {
   if (!hasOpenRouter) {
     throw Object.assign(new Error("OPENROUTER_API_KEY ausente"), { statusCode: 503 });
   }
+  const apiKey = config.OPENROUTER_API_KEY?.trim() ?? "";
+  if (!apiKey) {
+    throw Object.assign(new Error("OPENROUTER_API_KEY vazia após remover espaços"), { statusCode: 503 });
+  }
+  await validateOpenRouterCredential(apiKey, signal);
   if (catalogCache && Date.now() - catalogCache.at < 300_000) {
     return catalogCache.models;
   }
@@ -99,7 +124,7 @@ export async function freeModels(signal?: AbortSignal): Promise<Model[]> {
   url.searchParams.set("output_modalities", "text");
 
   const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${config.OPENROUTER_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
     signal: catalogSignal
   });
   if (!response.ok) {
@@ -131,11 +156,31 @@ export async function completeAgent(systemPrompt: string, input: unknown): Promi
   const start = modelCursor % models.length;
   modelCursor = (modelCursor + 1) % models.length;
   const candidates = [...models.slice(start), ...models.slice(0, start)].slice(0, MAX_MODEL_ATTEMPTS);
+  const diagnosticFetch: typeof fetch = async (input, init) => {
+    const requestUrl = input instanceof Request ? input.url : input instanceof URL ? input.href : String(input);
+    const requestHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const response = await fetch(input, init);
+    if (!loggedOpenRouterTransport) {
+      loggedOpenRouterTransport = true;
+      let responseHost = "unknown";
+      try { responseHost = new URL(response.url).host; } catch { /* ignore malformed response URL */ }
+      console.info("[Forge3D] OpenRouter completion transport diagnostic", {
+        requestHost: new URL(requestUrl).host,
+        authorizationHeaderPresent: requestHeaders.has("authorization"),
+        bearerCredentialPresent: requestHeaders.get("authorization")?.startsWith("Bearer ") === true && (requestHeaders.get("authorization")?.length ?? 0) > 7,
+        redirected: response.redirected,
+        responseHost,
+        status: response.status
+      });
+    }
+    return response;
+  };
   const client = new OpenAI({
-    apiKey: config.OPENROUTER_API_KEY!,
+    apiKey,
     baseURL: config.OPENROUTER_BASE_URL,
     timeout: MODEL_TIMEOUT_MS,
     maxRetries: 0,
+    fetch: diagnosticFetch,
     defaultHeaders: {
       ...(config.OPENROUTER_SITE_URL ? { "HTTP-Referer": config.OPENROUTER_SITE_URL } : {}),
       "X-Title": config.OPENROUTER_APP_NAME
