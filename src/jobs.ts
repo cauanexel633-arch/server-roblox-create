@@ -5,6 +5,7 @@ import { createSwordMesh, meshToObj } from "./geometry.js";
 import { meshToGlb } from "./glb.js";
 import { runAgent } from "./agents.js";
 import { runWorkerBatch } from "./worker-pool.js";
+import { parseWeaponSpec } from "./weapon-spec.js";
 
 type RobloxOperation = {
   path?: string;
@@ -137,7 +138,8 @@ export async function processOneJob() {
       });
       console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
     }
-    const mesh=createSwordMesh(config.MAX_TRIANGLES);
+    const visualSpec = parseWeaponSpec(description, intent);
+    const mesh=createSwordMesh(config.MAX_TRIANGLES, visualSpec);
     const glb=meshToGlb(mesh);
     const obj=meshToObj(mesh);
     const base=`${tenant_id}/${job_id}`;
@@ -161,14 +163,14 @@ export async function processOneJob() {
     }
     const {error:objError}=await db.storage.from("packages").upload(objPath,Buffer.from(obj),{contentType:"text/plain",upsert:true});
     if(objError) throw new Error(`Upload OBJ: ${objError.message}`);
-    const manifest={schema_version:"1.0",job_id,tenant_id,description,roblox_asset:{assetId:robloxAsset.assetId,assetPath:robloxAsset.assetPath},mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),limitations:["UV/PBR textures, rigging, keyframed animation and Roblox RBXMX are not generated in this release."]};
+    const manifest={schema_version:"1.0",job_id,tenant_id,description,roblox_asset:{assetId:robloxAsset.assetId,assetPath:robloxAsset.assetPath},mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),visual_spec: visualSpec,limitations:["UV/PBR texture maps, rigging, keyframed animation and Roblox RBXMX are not generated in this release.","Fire and aura are represented by generated emissive geometry plus Roblox runtime particle effects; the exact appearance depends on Roblox asset import preserving vertex colors."]};
     const manifestPath=`${base}/manifest.json`;
     const {error:manifestError}=await db.storage.from("packages").upload(manifestPath,Buffer.from(JSON.stringify(manifest,null,2)),{contentType:"application/json",upsert:true});
     if(manifestError) throw new Error(`Upload manifesto: ${manifestError.message}`);
     const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
     if(artifactError) throw new Error(`Persistência de artefatos: ${artifactError.message}`);
     await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S4",status:"completed",output:{triangles:mesh.triangleCount},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
-    await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+    await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec.effects},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
     await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
     return true;
   } catch(error) {
