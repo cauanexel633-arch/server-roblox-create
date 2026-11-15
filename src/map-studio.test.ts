@@ -11,7 +11,7 @@ vi.mock("./agents.js",()=>({runAgent:vi.fn(async(name:string)=>{
 })}));
 import {buildMapStudioPlan,validateMapStudioPlan} from "./map-studio.js";
 describe("Forge3D Map Studio",()=>{
- it("always inserts four anchored collidable perimeter barriers",async()=>{const p=await buildMapStudioPlan("Arena de deserto");expect(p.colliders.filter(c=>c.required)).toHaveLength(4);expect(p.colliders.every(c=>c.anchored&&c.can_collide)).toBe(true);expect(p.safety.closed_perimeter).toBe(true);expect(validateMapStudioPlan(p).valid).toBe(true);});
+ it("always inserts four anchored collidable perimeter barriers",async()=>{const p=await buildMapStudioPlan("Arena de deserto");expect(p.colliders.filter(c=>c.kind==="mandatory_perimeter_barrier")).toHaveLength(4);expect(p.colliders.some(c=>c.id==="safety_recovery_floor"&&c.required)).toBe(true);expect(p.colliders.every(c=>c.anchored&&c.can_collide)).toBe(true);expect(p.safety.closed_perimeter).toBe(true);expect(validateMapStudioPlan(p).valid).toBe(true);});
  it("rejects a missing boundary wall",async()=>{const p=await buildMapStudioPlan("Arena");p.colliders=p.colliders.filter(c=>c.id!=="safety_wall_north");expect(validateMapStudioPlan(p).valid).toBe(false);});
  it("rejects non-HTTPS and local reference URLs",async()=>{const p=await buildMapStudioPlan("Arena");expect(p.references.candidates).toHaveLength(1);});
  it("filters models outside playable bounds",async()=>{const p=await buildMapStudioPlan("Arena");expect(p.models.every(m=>Math.abs(m.position[0])+m.size[0]/2<=p.bounds.width/2)).toBe(true);});
