@@ -12,9 +12,9 @@ let catalogCache: { at: number; models: Model[] } | undefined;
 let modelCursor = 0;
 
 // One hard budget for catalog lookup and model fallback; Vercel must retain time to finalize a job.
-const AGENT_BUDGET_MS = 28_000;
+const AGENT_BUDGET_MS = 20_000;
 const CATALOG_TIMEOUT_MS = 5_000;
-const MODEL_TIMEOUT_MS = 6_500;
+const MODEL_TIMEOUT_MS = 4_500;
 const MAX_MODEL_ATTEMPTS = 4;
 
 function isTextCapable(model: Model): boolean {
