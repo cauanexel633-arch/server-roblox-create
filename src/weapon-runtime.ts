@@ -36,6 +36,8 @@ export async function buildWeaponRuntimePlan(description: string, visual: Weapon
   const ui=(l.ui&&typeof l.ui==="object"?l.ui:{}) as Record<string,unknown>;
   const combat=(s.combat&&typeof s.combat==="object"?s.combat:{}) as Record<string,unknown>;
   const anim=(a.animations&&typeof a.animations==="object"?a.animations:{}) as Record<string,unknown>;
+  const visualEffects=(d.effects&&typeof d.effects==="object"?d.effects:{}) as Record<string,unknown>;
+  const flag=(key:string,fallback:boolean)=>typeof visualEffects[key]==="boolean"?visualEffects[key] as boolean:fallback;
   const safeRequired=stringList(anim.required,ACTION_ALLOWLIST,["equip","idle","fire","reload"]);
   const safeRandom=stringList(anim.random_variants,ACTION_ALLOWLIST,["idle","inspect","equip"]);
   const controls=stringList(ui.controls,CONTROL_ALLOWLIST,combatClass==="melee"?["melee","block","parry","inspect"]:["fire","aim","reload","inspect"]);
@@ -54,7 +56,7 @@ export async function buildWeaponRuntimePlan(description: string, visual: Weapon
       projectile_speed:clampNumber(combat.projectile_speed,combatClass==="firearm"?900:180,10,3000)
     },
     animations:{required:safeRequired,random_variants:safeRandom,random_enabled:anim.random_enabled!==false,deterministic_actions:["fire","reload","aim","swing","block","parry","equip","holster"].filter(x=>safeRequired.includes(x)||x==="fire"||x==="reload")},
-    effects:{projectile_tracer:combatClass!=="melee",muzzle_flash:combatClass==="firearm",shell_ejection:combatClass==="firearm",swing_trail:combatClass==="melee",impact_burst:true,camera_recoil:combatClass!=="melee"},
+    effects:{projectile_tracer:combatClass!=="melee"&&flag("projectile_tracer",true),muzzle_flash:combatClass==="firearm"&&flag("muzzle_flash",true),shell_ejection:combatClass==="firearm"&&flag("shell_ejection",true),swing_trail:combatClass==="melee"&&flag("swing_trail",true),impact_burst:flag("impact_burst",true),camera_recoil:combatClass!=="melee"},
     script_contract:{request_remote:"ForgeWeaponAction",feedback_remote:"ForgeWeaponFeedback",client_payload_fields:["weapon_id","action","aim_origin","aim_direction","client_timestamp"],server_authoritative_fields:["damage","ammo","cooldown","hit_validation","reload_state"]},
     security:{allow_client_damage:false,allow_client_ammo:false,allow_client_hit_claims:false,require_server_raycast:true},
     limitations:["Animações são planejadas por nomes de ações e variações; IDs/keyframes reais ainda precisam ser fornecidos ou gerados por uma etapa de rigging.","O traçador é visual; dano e acerto devem ser calculados exclusivamente no servidor.",...limits]
