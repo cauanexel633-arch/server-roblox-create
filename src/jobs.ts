@@ -169,7 +169,7 @@ export async function processOneJob() {
         updated_at: new Date().toISOString()
       }).eq("id", job_id).eq("tenant_id", tenant_id);
       if (pendingUpdateError) throw new Error(`Falha ao salvar estado pendente do Roblox: ${pendingUpdateError.message}`);
-      const { error: retryError } = await db.rpc("forge_retry_job", { p_msg_id: msg.msg_id, p_delay_seconds: 20 });
+      const { error: retryError } = await db.rpc("forge_retry_job", { p_msg_id: msg.msg_id, p_delay_seconds: 4 });
       if (retryError) throw new Error(`Falha ao reagendar consulta da publicação: ${retryError.message}`);
       console.info("[Forge3D] Roblox operation pending; same job rescheduled without consuming an attempt", { job_id, operation: robloxAsset.operationPath });
       return true;
