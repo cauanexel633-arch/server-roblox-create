@@ -14,7 +14,7 @@ local UNIVERSE_ID = 10776153543
 local MAX_DESCRIPTION_LENGTH = 1000
 local PLAYER_COOLDOWN_SECONDS = 60
 local POLL_INTERVAL_SECONDS = 3
-local MAX_POLL_ATTEMPTS = 30
+local MAX_POLL_ATTEMPTS = 200 -- 10-minute server-side deadline
 
 local apiToken = HttpService:GetSecret("FORGE3D_API_TOKEN")
 local requestEvent = ReplicatedStorage:FindFirstChild("Forge3DRequest") or Instance.new("RemoteEvent")
@@ -25,6 +25,7 @@ statusEvent.Name = "Forge3DStatus"
 statusEvent.Parent = ReplicatedStorage
 
 local lastRequestAt: {[number]: number} = {}
+local activeRequests: {[number]: boolean} = {}
 
 local function requestApi(method: string, path: string, body: any?)
 	local headers = {
@@ -174,6 +175,7 @@ local function processWeaponRequest(player: Player, description: string)
 		end
 	end)
 
+	local consecutivePollFailures = 0
 	for attempt = 1, MAX_POLL_ATTEMPTS do
 		if player.Parent ~= Players then return end
 		task.wait(POLL_INTERVAL_SECONDS)
@@ -187,10 +189,15 @@ local function processWeaponRequest(player: Player, description: string)
 			return requestApi("GET", path)
 		end)
 		if not pollOk then
+			consecutivePollFailures += 1
 			warn("[Forge3D] status request failed:", job)
-			sendStatus(player, "error", {message = "Falha ao consultar o progresso da geração."})
-			return
+			-- A transient API/network failure must not be mistaken for a failed generation.
+			if consecutivePollFailures >= 10 then
+				sendStatus(player, "progress", {job_id = jobId, status = "checking_connection", progress = 0, message = "Reconectando ao serviço de geração..."})
+			end
+			continue
 		end
+		consecutivePollFailures = 0
 
 		sendStatus(player, "progress", {
 			job_id = jobId,
@@ -251,18 +258,50 @@ local function processWeaponRequest(player: Player, description: string)
 			})
 			return
 		elseif job.status == "failed" or job.status == "cancelled" then
-			sendStatus(player, "error", {message = "A geração não foi concluída.", job_id = jobId})
+			sendStatus(player, "error", {
+				message = job.error_message or "Não foi possível gerar sua arma. Faça uma nova solicitação.",
+				job_id = jobId,
+				can_retry = true,
+				error_code = job.error_code,
+			})
 			return
 		end
 	end
 
-	sendStatus(player, "timeout", {message = "A solicitação continua na fila. Consulte novamente mais tarde.", job_id = jobId})
+	-- The server-side deadline has elapsed. Ask the API to cancel the job so the
+	-- worker acknowledges it instead of generating an asset after the player gave up.
+	local cancelPath = string.format("/v1/jobs/%s/cancel?universe_id=%d&user_id=%s", jobId, UNIVERSE_ID, tostring(player.UserId))
+	local cancelOk, cancelResult = pcall(function()
+		return requestApi("POST", cancelPath, {})
+	end)
+	if not cancelOk then
+		warn("[Forge3D] timed-out job cancellation could not be confirmed:", cancelResult)
+	end
+	sendStatus(player, "error", {
+		message = "A geração excedeu o tempo limite. A solicitação foi encerrada; faça uma nova solicitação.",
+		job_id = jobId,
+		can_retry = true,
+		error_code = "client_timeout",
+	})
 end
 
 requestEvent.OnServerEvent:Connect(function(player: Player, description: any)
-	task.spawn(processWeaponRequest, player, description)
+	if activeRequests[player.UserId] then
+		sendStatus(player, "error", {message = "Você já tem uma solicitação em andamento. Aguarde o resultado."})
+		return
+	end
+	activeRequests[player.UserId] = true
+	task.spawn(function()
+		local ok, err = pcall(processWeaponRequest, player, description)
+		if not ok then
+			warn("[Forge3D] unexpected request handler error:", err)
+			sendStatus(player, "error", {message = "Ocorreu um erro inesperado. Faça uma nova solicitação.", can_retry = true})
+		end
+		activeRequests[player.UserId] = nil
+	end)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
 	lastRequestAt[player.UserId] = nil
+	activeRequests[player.UserId] = nil
 end)
