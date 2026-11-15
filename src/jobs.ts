@@ -120,10 +120,19 @@ export async function processOneJob() {
   try {
     const {data:job,error:readError}=await db.from("forge_jobs").select("*").eq("id",job_id).eq("tenant_id",tenant_id).single();
     if(readError||!job) throw new Error("Job não encontrado");
-    if(job.status==="cancelled"||job.status==="completed") {
+    if(job.status==="cancelled"||job.status==="completed"||job.status==="failed") {
       await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id}); return true;
     }
-    await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id);
+    const createdAt = new Date(job.created_at).getTime();
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > MAX_JOB_AGE_MS) {
+      const timeoutMessage = "A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação.";
+      const {error:timeoutUpdateError}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",error_code:"job_timeout",last_error:timeoutMessage,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(timeoutUpdateError) throw new Error(`Falha ao registrar timeout: ${timeoutUpdateError.message}`);
+      await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:timeoutMessage});
+      console.warn("[Forge3D] expired job moved out of active queue", {job_id});
+      return true;
+    }
+    await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
     const request=job.request as Record<string,unknown>;
     const description=String(request.weapon_description??"Arma de fantasia");
     const previousResult = (job.result && typeof job.result === "object" ? job.result : {}) as Record<string, unknown>;
@@ -174,23 +183,48 @@ export async function processOneJob() {
     const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
     if(artifactError) throw new Error(`Persistência de artefatos: ${artifactError.message}`);
     await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S4",status:"completed",output:{triangles:mesh.triangleCount},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
-    await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec},completed_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
-    await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
+    const {error:completionError}=await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec},completed_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null,error_code:null}).eq("id",job_id).eq("tenant_id",tenant_id);
+    if(completionError) throw new Error(`Falha ao registrar conclusão do job: ${completionError.message}`);
+    const {error:ackError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
+    if(ackError) throw new Error(`Falha ao confirmar remoção da fila: ${ackError.message}`);
     return true;
   } catch(error) {
     const message=error instanceof Error?error.message:"unknown";
-    console.error("[Forge3D] job failed; scheduling retry", { job_id, message });
-    const {data:state}=await db.from("forge_jobs").select("attempts").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
+    const failure=classifyJobError(error);
+    console.error("[Forge3D] job processing error", {job_id,code:failure.code,message});
+    const {data:state}=await db.from("forge_jobs").select("attempts,created_at").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
     const attempts=Number(state?.attempts??0)+1;
-    if(attempts>=3){
-      await db.from("forge_jobs").update({status:"failed",attempts,last_error:message.slice(0,500),error_code:"max_attempts"}).eq("id",job_id).eq("tenant_id",tenant_id);
-      await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:message});
-    }else{
-      await db.from("forge_jobs").update({status:"queued",attempts,last_error:message.slice(0,500)}).eq("id",job_id).eq("tenant_id",tenant_id);
-      await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30*attempts});
+    const createdAt=new Date(state?.created_at??0).getTime();
+    const expired=!Number.isFinite(createdAt)||Date.now()-createdAt>=MAX_JOB_AGE_MS;
+    const terminal=!failure.retryable||attempts>=MAX_JOB_ATTEMPTS||expired;
+    if(terminal) {
+      const publicMessage=expired
+        ? "A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação."
+        : "Não foi possível gerar sua arma após as tentativas automáticas. Faça uma nova solicitação.";
+      const errorCode=expired?"job_timeout":(attempts>=MAX_JOB_ATTEMPTS?"max_attempts":failure.code);
+      const {error:updateError}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",attempts,last_error:publicMessage,error_code:errorCode,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(updateError) {
+        console.error("[Forge3D] failed to persist terminal job state",{job_id,error:updateError.message});
+        await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
+        return true;
+      }
+      const {error:dlqError}=await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:message.slice(0,500)});
+      if(dlqError) {
+        console.error("[Forge3D] failed to move terminal job to dead-letter queue",{job_id,error:dlqError.message});
+        // The failed status is authoritative. Re-expose the message so the next worker acknowledges it.
+        await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
+      }
+    } else {
+      const delaySeconds=retryDelaySeconds(attempts);
+      const {error:updateError}=await db.from("forge_jobs").update({status:"queued",attempts,last_error:message.slice(0,500),error_code:failure.code,updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(updateError) console.error("[Forge3D] failed to persist retry state",{job_id,error:updateError.message});
+      const {error:retryError}=await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:delaySeconds});
+      if(retryError) {
+        const {error:failedUpdateError}=await db.from("forge_jobs").update({status:"failed",current_stage:"failed",error_code:"queue_retry_failed",last_error:"Não foi possível reagendar a solicitação. Faça uma nova solicitação.",completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+        if(!failedUpdateError) await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:retryError.message});
+      }
     }
     return true;
-  }
 }
 
 export async function runQueueWorker() {
