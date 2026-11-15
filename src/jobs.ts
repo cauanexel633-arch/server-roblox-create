@@ -6,268 +6,153 @@ import { meshToGlb } from "./glb.js";
 import { runAgent } from "./agents.js";
 import { runWorkerBatch } from "./worker-pool.js";
 import { parseWeaponSpec } from "./weapon-spec.js";
+import { buildWeaponRuntimePlan } from "./weapon-runtime.js";
 import { classifyJobError, retryDelaySeconds } from "./job-failure-policy.js";
 
 const MAX_JOB_AGE_MS = 10 * 60 * 1000;
 const MAX_JOB_ATTEMPTS = 3;
 
 type RobloxOperation = {
-  path?: string;
-  done?: boolean;
-  error?: { code?: number; message?: string };
+  path?: string; done?: boolean; error?: { code?: number; message?: string };
   response?: { assetId?: number | string; path?: string; moderationResult?: { moderationState?: string } };
 };
 
-async function publishGlbToRoblox(
-  db: ReturnType<typeof requireDatabase>,
-  jobId: string,
-  tenantId: string,
-  description: string,
-  existingResult: Record<string, unknown>,
-  glbPath: string,
-  agentSpec: string
-): Promise<{ status: "pending"; operationPath: string } | { status: "completed"; assetId: string; assetPath: string }> {
-  if (!config.ROBLOX_OPEN_CLOUD_API_KEY || !config.ROBLOX_CREATOR_USER_ID) {
-    throw new Error("Publicação Roblox não configurada: verifique ROBLOX_OPEN_CLOUD_API_KEY e ROBLOX_CREATOR_USER_ID na Vercel.");
+async function publishGlbToRoblox(db: ReturnType<typeof requireDatabase>,jobId:string,tenantId:string,description:string,existingResult:Record<string,unknown>,glbPath:string,agentSpec:string):Promise<{status:"pending";operationPath:string}|{status:"completed";assetId:string;assetPath:string}> {
+  if(!config.ROBLOX_OPEN_CLOUD_API_KEY||!config.ROBLOX_CREATOR_USER_ID)throw new Error("Publicação Roblox não configurada: verifique ROBLOX_OPEN_CLOUD_API_KEY e ROBLOX_CREATOR_USER_ID na Vercel.");
+  const creatorId=Number(config.ROBLOX_CREATOR_USER_ID);
+  if(!Number.isSafeInteger(creatorId)||creatorId<=0)throw new Error("ROBLOX_CREATOR_USER_ID inválido.");
+  let operationPath=typeof existingResult.roblox_operation_path==="string"?existingResult.roblox_operation_path:"";
+  if(!operationPath){
+    const {data:file,error:downloadError}=await db.storage.from("packages").download(glbPath);
+    if(downloadError||!file)throw new Error(`Não foi possível recuperar o GLB para publicar: ${downloadError?.message??"arquivo ausente"}`);
+    const form=new FormData();
+    form.append("request",JSON.stringify({assetType:"Model",displayName:`Forge3D-${jobId.slice(0,8)}`,description:`Arma gerada pelo Forge3D. Job: ${jobId}. ${description.slice(0,700)}`,creationContext:{creator:{userId:creatorId},expectedPrice:0}}));
+    form.append("fileContent",new Blob([await file.arrayBuffer()],{type:"model/gltf-binary"}),`forge3d-${jobId}.glb`);
+    const uploadResponse=await fetch("https://apis.roblox.com/assets/v1/assets",{method:"POST",headers:{"x-api-key":config.ROBLOX_OPEN_CLOUD_API_KEY},body:form,signal:AbortSignal.timeout(20000)});
+    const uploadBody=await uploadResponse.json().catch(()=>({})) as RobloxOperation&{message?:string};
+    if(!uploadResponse.ok)throw new Error(`Roblox Create Asset falhou: ${String(uploadBody.error?.message??uploadBody.message??`HTTP ${uploadResponse.status}`).slice(0,350)}`);
+    if(!uploadBody.path||!/^operations\/[A-Za-z0-9_-]+$/.test(uploadBody.path))throw new Error("Roblox não retornou um caminho de operação válido.");
+    operationPath=uploadBody.path;
+    const {error:saveOperationError}=await db.from("forge_jobs").update({result:{...existingResult,roblox_operation_path:operationPath,agent_spec:agentSpec},updated_at:new Date().toISOString()}).eq("id",jobId).eq("tenant_id",tenantId);
+    if(saveOperationError)throw new Error(`Não foi possível salvar a operação de publicação: ${saveOperationError.message}`);
   }
-
-  const creatorId = Number(config.ROBLOX_CREATOR_USER_ID);
-  if (!Number.isSafeInteger(creatorId) || creatorId <= 0) {
-    throw new Error("ROBLOX_CREATOR_USER_ID inválido.");
-  }
-
-  let operationPath = typeof existingResult.roblox_operation_path === "string"
-    ? existingResult.roblox_operation_path
-    : "";
-
-  if (!operationPath) {
-    const { data: file, error: downloadError } = await db.storage.from("packages").download(glbPath);
-    if (downloadError || !file) throw new Error(`Não foi possível recuperar o GLB para publicar: ${downloadError?.message ?? "arquivo ausente"}`);
-
-    const form = new FormData();
-    form.append("request", JSON.stringify({
-      assetType: "Model",
-      displayName: `Forge3D-${jobId.slice(0, 8)}`,
-      description: `Arma gerada pelo Forge3D. Job: ${jobId}. ${description.slice(0, 700)}`,
-      creationContext: {
-        creator: { userId: creatorId },
-        // Never allow an unexpected Robux upload charge.
-        expectedPrice: 0
-      }
-    }));
-    form.append("fileContent", new Blob([await file.arrayBuffer()], { type: "model/gltf-binary" }), `forge3d-${jobId}.glb`);
-
-    const uploadResponse = await fetch("https://apis.roblox.com/assets/v1/assets", {
-      method: "POST",
-      headers: { "x-api-key": config.ROBLOX_OPEN_CLOUD_API_KEY },
-      body: form,
-      signal: AbortSignal.timeout(20000)
-    });
-    const uploadBody = await uploadResponse.json().catch(() => ({})) as RobloxOperation & { message?: string };
-    if (!uploadResponse.ok) {
-      const detail = uploadBody.error?.message ?? uploadBody.message ?? `HTTP ${uploadResponse.status}`;
-      throw new Error(`Roblox Create Asset falhou: ${String(detail).slice(0, 350)}`);
-    }
-    if (!uploadBody.path || !/^operations\/[A-Za-z0-9_-]+$/.test(uploadBody.path)) {
-      throw new Error("Roblox não retornou um caminho de operação válido.");
-    }
-    operationPath = uploadBody.path;
-    const { error: saveOperationError } = await db.from("forge_jobs")
-      .update({ result: { ...existingResult, roblox_operation_path: operationPath, agent_spec: agentSpec }, updated_at: new Date().toISOString() })
-      .eq("id", jobId).eq("tenant_id", tenantId);
-    if (saveOperationError) throw new Error(`Não foi possível salvar a operação de publicação: ${saveOperationError.message}`);
-  }
-
-  const operationId = operationPath.slice("operations/".length);
-  const response = await fetch(`https://apis.roblox.com/assets/v1/operations/${encodeURIComponent(operationId)}`, {
-    headers: { "x-api-key": config.ROBLOX_OPEN_CLOUD_API_KEY },
-    signal: AbortSignal.timeout(8000)
-  });
-  const operation = await response.json().catch(() => ({})) as RobloxOperation;
-  if (!response.ok) {
-    const detail = operation.error?.message ?? `HTTP ${response.status}`;
-    throw new Error(`Roblox Get Operation falhou: ${String(detail).slice(0, 350)}`);
-  }
-  if (!operation.done) return { status: "pending", operationPath };
-  if (operation.error) throw new Error(`Roblox rejeitou a publicação: ${operation.error.message ?? operation.error.code ?? "erro desconhecido"}`);
-
-  const assetId = operation.response?.assetId;
-  const assetPath = operation.response?.path ?? (assetId ? `assets/${assetId}` : "");
-  if (!assetId || !assetPath) throw new Error("Roblox concluiu a operação sem retornar assetId.");
-
-  return { status: "completed", assetId: String(assetId), assetPath };
+  const operationId=operationPath.slice("operations/".length);
+  const response=await fetch(`https://apis.roblox.com/assets/v1/operations/${encodeURIComponent(operationId)}`,{headers:{"x-api-key":config.ROBLOX_OPEN_CLOUD_API_KEY},signal:AbortSignal.timeout(8000)});
+  const operation=await response.json().catch(()=>({})) as RobloxOperation;
+  if(!response.ok)throw new Error(`Roblox Get Operation falhou: ${String(operation.error?.message??`HTTP ${response.status}`).slice(0,350)}`);
+  if(!operation.done)return {status:"pending",operationPath};
+  if(operation.error)throw new Error(`Roblox rejeitou a publicação: ${operation.error.message??operation.error.code??"erro desconhecido"}`);
+  const assetId=operation.response?.assetId,assetPath=operation.response?.path??(assetId?`assets/${assetId}`:"");
+  if(!assetId||!assetPath)throw new Error("Roblox concluiu a operação sem retornar assetId.");
+  return {status:"completed",assetId:String(assetId),assetPath};
 }
 
-export async function createJob(tenantId: string, payload: Record<string, unknown>, idempotencyKey: string) {
+export async function createJob(tenantId:string,payload:Record<string,unknown>,idempotencyKey:string){
   const db=requireDatabase();
   const {data:existing}=await db.from("forge_jobs").select("id,status").eq("tenant_id",tenantId).eq("idempotency_key",idempotencyKey).maybeSingle();
-  if(existing) return existing;
+  if(existing)return existing;
   const id=randomUUID();
   const {error}=await db.from("forge_jobs").insert({id,tenant_id:tenantId,status:"queued",progress:0,request:payload,idempotency_key:idempotencyKey,current_stage:"S1"});
-  if(error) throw new Error(`Falha ao criar job: ${error.message}`);
+  if(error)throw new Error(`Falha ao criar job: ${error.message}`);
   const {error:queueError}=await db.rpc("forge_enqueue_job",{p_job_id:id,p_tenant_id:tenantId});
-  if(queueError) { await db.from("forge_jobs").update({status:"failed",error_code:"queue_error"}).eq("id",id); throw new Error("Falha ao enfileirar job"); }
+  if(queueError){await db.from("forge_jobs").update({status:"failed",error_code:"queue_error"}).eq("id",id);throw new Error("Falha ao enfileirar job");}
   return {id,status:"queued",progress:0};
 }
 
-export async function processOneJob() {
+export async function processOneJob(){
   const db=requireDatabase();
   const {data:messages,error}=await db.rpc("forge_claim_jobs",{p_qty:1,p_visibility_seconds:180});
-  if(error) throw new Error(`Falha ao consumir fila: ${error.message}`);
+  if(error)throw new Error(`Falha ao consumir fila: ${error.message}`);
   const msg=messages?.[0] as {msg_id:number;message:{job_id:string;tenant_id:string}}|undefined;
-  if(!msg) return false;
+  if(!msg)return false;
   const {job_id,tenant_id}=msg.message;
-  try {
+  try{
     const {data:job,error:readError}=await db.from("forge_jobs").select("*").eq("id",job_id).eq("tenant_id",tenant_id).single();
-    if(readError||!job) throw new Error("Job não encontrado");
-    if(job.status==="cancelled"||job.status==="completed"||job.status==="failed") {
-      const {error:terminalAckError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
-      if(terminalAckError) throw new Error("Falha ao confirmar remoção de job terminal: " + terminalAckError.message);
-      return true;
-    }
-    const createdAt = new Date(job.created_at).getTime();
-    if (!Number.isFinite(createdAt) || Date.now() - createdAt > MAX_JOB_AGE_MS) {
-      const timeoutMessage = "A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação.";
-      const {error:timeoutUpdateError}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",error_code:"job_timeout",last_error:timeoutMessage,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
-      if(timeoutUpdateError) throw new Error(`Falha ao registrar timeout: ${timeoutUpdateError.message}`);
-      await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:timeoutMessage});
-      console.warn("[Forge3D] expired job moved out of active queue", {job_id});
-      return true;
+    if(readError||!job)throw new Error("Job não encontrado");
+    if(["cancelled","completed","failed"].includes(job.status)){const {error:e}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});if(e)throw new Error("Falha ao confirmar remoção de job terminal: "+e.message);return true;}
+    const createdAt=new Date(job.created_at).getTime();
+    if(!Number.isFinite(createdAt)||Date.now()-createdAt>MAX_JOB_AGE_MS){
+      const timeoutMessage="A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação.";
+      const {error:e}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",error_code:"job_timeout",last_error:timeoutMessage,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(e)throw new Error(`Falha ao registrar timeout: ${e.message}`);
+      await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:timeoutMessage});return true;
     }
     await db.from("forge_jobs").update({status:"processing",updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
     const request=job.request as Record<string,unknown>;
     const description=String(request.weapon_description??"Arma de fantasia");
-    const previousResult = (job.result && typeof job.result === "object" ? job.result : {}) as Record<string, unknown>;
-    let intent: string;
-    if (typeof previousResult.agent_spec === "string" && previousResult.agent_spec.length > 0) {
-      intent = previousResult.agent_spec;
-      console.info("[Forge3D] resuming Roblox publication", { job_id, operation: previousResult.roblox_operation_path });
-    } else {
-      console.info("[Forge3D] agent started", { job_id, stage: "SpecInterpreter" });
-      intent=await runAgent("SpecInterpreter",{
-        description,
-        category:request.category,
-        style:request.style,
-        server_policy:request.server_prompt,
-        player_user_id: (request.player as {user_id?:string}|undefined)?.user_id
-      });
-      console.info("[Forge3D] agent completed", { job_id, stage: "SpecInterpreter" });
-    }
-    const visualSpec = parseWeaponSpec(description, intent);
-    const mesh=createWeaponMesh(config.MAX_TRIANGLES, visualSpec);
-    const glb=meshToGlb(mesh, visualSpec);
-    const obj=meshToObj(mesh);
+    const previousResult=(job.result&&typeof job.result==="object"?job.result:{}) as Record<string,unknown>;
+    let intent:string;
+    if(typeof previousResult.agent_spec==="string"&&previousResult.agent_spec.length>0){intent=previousResult.agent_spec;}
+    else{intent=await runAgent("SpecInterpreter",{description,category:request.category,style:request.style,server_policy:request.server_prompt,player_user_id:(request.player as {user_id?:string}|undefined)?.user_id});}
+    const visualSpec=parseWeaponSpec(description,intent);
+    const runtimePlan=await buildWeaponRuntimePlan(description,visualSpec);
+    const mesh=createWeaponMesh(config.MAX_TRIANGLES,visualSpec);
+    const glb=meshToGlb(mesh,visualSpec),obj=meshToObj(mesh);
     const base=`${tenant_id}/${job_id}`;
-    const glbPath=`${base}/weapon.glb`,objPath=`${base}/weapon.obj`;
+    const glbPath=`${base}/weapon.glb`,objPath=`${base}/weapon.obj`,runtimePath=`${base}/weapon-runtime.json`;
     const {error:glbError}=await db.storage.from("packages").upload(glbPath,glb,{contentType:"model/gltf-binary",upsert:true});
-    if(glbError) throw new Error(`Upload GLB: ${glbError.message}`);
-    const robloxAsset = await publishGlbToRoblox(db, job_id, tenant_id, description, previousResult, glbPath, intent);
-    if (robloxAsset.status === "pending") {
-      const { error: pendingUpdateError } = await db.from("forge_jobs").update({
-        status: "queued",
-        progress: 90,
-        current_stage: "roblox_publishing",
-        result: { ...previousResult, roblox_operation_path: robloxAsset.operationPath, agent_spec: intent },
-        updated_at: new Date().toISOString()
-      }).eq("id", job_id).eq("tenant_id", tenant_id);
-      if (pendingUpdateError) throw new Error(`Falha ao salvar estado pendente do Roblox: ${pendingUpdateError.message}`);
-      const { error: retryError } = await db.rpc("forge_retry_job", { p_msg_id: msg.msg_id, p_delay_seconds: 4 });
-      if (retryError) throw new Error(`Falha ao reagendar consulta da publicação: ${retryError.message}`);
-      console.info("[Forge3D] Roblox operation pending; same job rescheduled without consuming an attempt", { job_id, operation: robloxAsset.operationPath });
+    if(glbError)throw new Error(`Upload GLB: ${glbError.message}`);
+    const robloxAsset=await publishGlbToRoblox(db,job_id,tenant_id,description,previousResult,glbPath,intent);
+    if(robloxAsset.status==="pending"){
+      const {error:e}=await db.from("forge_jobs").update({status:"queued",progress:90,current_stage:"roblox_publishing",result:{...previousResult,roblox_operation_path:robloxAsset.operationPath,agent_spec:intent,runtime_plan:runtimePlan},updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(e)throw new Error(`Falha ao salvar estado pendente do Roblox: ${e.message}`);
+      const {error:retryError}=await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:4});
+      if(retryError)throw new Error(`Falha ao reagendar consulta da publicação: ${retryError.message}`);
       return true;
     }
     const {error:objError}=await db.storage.from("packages").upload(objPath,Buffer.from(obj),{contentType:"text/plain",upsert:true});
-    if(objError) throw new Error(`Upload OBJ: ${objError.message}`);
-    const manifest={schema_version:"1.0",job_id,tenant_id,description,roblox_asset:{assetId:robloxAsset.assetId,assetPath:robloxAsset.assetPath},mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts:[{path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},{path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")}],agent_spec: safeJson(intent),visual_spec: visualSpec,limitations:["UV/PBR texture maps, rigging, keyframed animation and Roblox RBXMX are not generated in this release.","Fire and aura are represented by generated emissive geometry plus Roblox runtime particle effects; the exact appearance depends on Roblox asset import preserving vertex colors."]};
+    if(objError)throw new Error(`Upload OBJ: ${objError.message}`);
+    const runtimeJson=Buffer.from(JSON.stringify(runtimePlan,null,2));
+    const {error:runtimeError}=await db.storage.from("packages").upload(runtimePath,runtimeJson,{contentType:"application/json",upsert:true});
+    if(runtimeError)throw new Error(`Upload plano de runtime: ${runtimeError.message}`);
+    const artifacts=[
+      {path:glbPath,mime:"model/gltf-binary",sha256:createHash("sha256").update(glb).digest("hex")},
+      {path:objPath,mime:"text/plain",sha256:createHash("sha256").update(obj).digest("hex")},
+      {path:runtimePath,mime:"application/json",sha256:createHash("sha256").update(runtimeJson).digest("hex")}
+    ];
+    const manifest={schema_version:"1.1",job_id,tenant_id,description,roblox_asset:{assetId:robloxAsset.assetId,assetPath:robloxAsset.assetPath},mesh:{vertices:mesh.positions.length/3,triangles:mesh.triangleCount},artifacts,agent_spec:safeJson(intent),visual_spec:visualSpec,runtime_plan:runtimePlan,limitations:["Este release entrega um plano validado de runtime; LocalScript/ServerScript instaláveis, IDs de animação e assets de rig ainda exigem a etapa de empacotamento/runtime.","UV/PBR, rigging e keyframes reais não são gerados neste release."]};
     const manifestPath=`${base}/manifest.json`;
     const {error:manifestError}=await db.storage.from("packages").upload(manifestPath,Buffer.from(JSON.stringify(manifest,null,2)),{contentType:"application/json",upsert:true});
-    if(manifestError) throw new Error(`Upload manifesto: ${manifestError.message}`);
-    const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:manifest.artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:manifest.artifacts[1]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
-    if(artifactError) throw new Error(`Persistência de artefatos: ${artifactError.message}`);
-    await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S4",status:"completed",output:{triangles:mesh.triangleCount},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
-    const {error:completionError}=await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec},completed_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null,error_code:null}).eq("id",job_id).eq("tenant_id",tenant_id);
-    if(completionError) throw new Error(`Falha ao registrar conclusão do job: ${completionError.message}`);
+    if(manifestError)throw new Error(`Upload manifesto: ${manifestError.message}`);
+    const {error:artifactError}=await db.from("forge_artifacts").upsert([{tenant_id,job_id,kind:"glb",storage_path:glbPath,sha256:artifacts[0]!.sha256},{tenant_id,job_id,kind:"obj",storage_path:objPath,sha256:artifacts[1]!.sha256},{tenant_id,job_id,kind:"runtime",storage_path:runtimePath,sha256:artifacts[2]!.sha256},{tenant_id,job_id,kind:"manifest",storage_path:manifestPath,sha256:createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}],{onConflict:"job_id,kind"});
+    if(artifactError)throw new Error(`Persistência de artefatos: ${artifactError.message}`);
+    await db.from("forge_job_stages").upsert({job_id,tenant_id,stage:"S1-S5",status:"completed",output:{triangles:mesh.triangleCount,runtime_class:runtimePlan.combat_class},completed_at:new Date().toISOString()},{onConflict:"job_id,stage"});
+    const {error:completionError}=await db.from("forge_jobs").update({status:"completed",progress:100,current_stage:"completed",result:{manifest_path:manifestPath,asset_id:robloxAsset.assetId,asset_path:robloxAsset.assetPath,visual_effects:visualSpec,runtime_plan:runtimePlan},completed_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null,error_code:null}).eq("id",job_id).eq("tenant_id",tenant_id);
+    if(completionError)throw new Error(`Falha ao registrar conclusão do job: ${completionError.message}`);
     const {error:ackError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
-    if(ackError) throw new Error(`Falha ao confirmar remoção da fila: ${ackError.message}`);
+    if(ackError)throw new Error(`Falha ao confirmar remoção da fila: ${ackError.message}`);
     return true;
-  } catch(error) {
-    const message=error instanceof Error?error.message:"unknown";
-    const failure=classifyJobError(error);
-    console.error("[Forge3D] job processing error", {job_id,code:failure.code,message});
+  }catch(error){
+    const message=error instanceof Error?error.message:"unknown",failure=classifyJobError(error);
+    console.error("[Forge3D] job processing error",{job_id,code:failure.code,message});
     const {data:state,error:stateReadError}=await db.from("forge_jobs").select("attempts,created_at,status").eq("id",job_id).eq("tenant_id",tenant_id).maybeSingle();
-    if(stateReadError || !state) {
-      console.error("[Forge3D] could not read job state after processing error",{job_id,error:stateReadError?.message});
-      const {error:requeueError}=await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
-      if(requeueError) console.error("[Forge3D] failed to requeue job after state read error",{job_id,error:requeueError.message});
-      return true;
-    }
-    // A queue-ack failure after a successful DB completion must never turn a
-    // successfully published weapon into a failed job. Retry only queue cleanup.
-    if(["completed","cancelled","failed"].includes(String(state.status))) {
-      const {error:terminalAckError}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});
-      if(terminalAckError) console.error("[Forge3D] terminal job queue acknowledgement failed; visibility timeout will retry cleanup",{job_id,error:terminalAckError.message});
-      return true;
-    }
-    const attempts=Number(state.attempts??0)+1;
-    const createdAt=new Date(state?.created_at??0).getTime();
-    const expired=!Number.isFinite(createdAt)||Date.now()-createdAt>=MAX_JOB_AGE_MS;
-    const terminal=!failure.retryable||attempts>=MAX_JOB_ATTEMPTS||expired;
-    if(terminal) {
-      const publicMessage=expired
-        ? "A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação."
-        : "Não foi possível gerar sua arma após as tentativas automáticas. Faça uma nova solicitação.";
-      const errorCode=expired?"job_timeout":(attempts>=MAX_JOB_ATTEMPTS?"max_attempts":failure.code);
-      const {error:updateError}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",attempts,last_error:publicMessage,error_code:errorCode,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
-      if(updateError) {
-        console.error("[Forge3D] failed to persist terminal job state",{job_id,error:updateError.message});
-        await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
-        return true;
-      }
+    if(stateReadError||!state){console.error("[Forge3D] could not read job state after processing error",{job_id,error:stateReadError?.message});await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});return true;}
+    if(["completed","cancelled","failed"].includes(String(state.status))){const {error:e}=await db.rpc("forge_ack_job",{p_msg_id:msg.msg_id});if(e)console.error("[Forge3D] terminal queue acknowledgement failed",{job_id,error:e.message});return true;}
+    const attempts=Number(state.attempts??0)+1,createdAt=new Date(state.created_at??0).getTime(),expired=!Number.isFinite(createdAt)||Date.now()-createdAt>=MAX_JOB_AGE_MS,terminal=!failure.retryable||attempts>=MAX_JOB_ATTEMPTS||expired;
+    if(terminal){
+      const publicMessage=expired?"A solicitação excedeu o tempo máximo de processamento. Faça uma nova solicitação.":"Não foi possível gerar sua arma após as tentativas automáticas. Faça uma nova solicitação.";
+      const errorCode=expired?"job_timeout":attempts>=MAX_JOB_ATTEMPTS?"max_attempts":failure.code;
+      const {error:e}=await db.from("forge_jobs").update({status:"failed",progress:0,current_stage:"failed",attempts,last_error:publicMessage,error_code:errorCode,completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
+      if(e){console.error("[Forge3D] failed to persist terminal state",{job_id,error:e.message});await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});return true;}
       const {error:dlqError}=await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:message.slice(0,500)});
-      if(dlqError) {
-        console.error("[Forge3D] failed to move terminal job to dead-letter queue",{job_id,error:dlqError.message});
-        // The failed status is authoritative. Re-expose the message so the next worker acknowledges it.
-        await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});
-      }
-    } else {
+      if(dlqError){console.error("[Forge3D] failed to move terminal job to DLQ",{job_id,error:dlqError.message});await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:30});}
+    }else{
       const delaySeconds=retryDelaySeconds(attempts);
       const {error:updateError}=await db.from("forge_jobs").update({status:"queued",attempts,last_error:message.slice(0,500),error_code:failure.code,updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
-      if(updateError) console.error("[Forge3D] failed to persist retry state",{job_id,error:updateError.message});
+      if(updateError)console.error("[Forge3D] failed to persist retry state",{job_id,error:updateError.message});
       const {error:retryError}=await db.rpc("forge_retry_job",{p_msg_id:msg.msg_id,p_delay_seconds:delaySeconds});
-      if(retryError) {
-        const {error:failedUpdateError}=await db.from("forge_jobs").update({status:"failed",current_stage:"failed",error_code:"queue_retry_failed",last_error:"Não foi possível reagendar a solicitação. Faça uma nova solicitação.",completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);
-        if(!failedUpdateError) await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:retryError.message});
-      }
+      if(retryError){const {error:failedUpdateError}=await db.from("forge_jobs").update({status:"failed",current_stage:"failed",error_code:"queue_retry_failed",last_error:"Não foi possível reagendar a solicitação. Faça uma nova solicitação.",completed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",job_id).eq("tenant_id",tenant_id);if(!failedUpdateError)await db.rpc("forge_dlq_job",{p_msg_id:msg.msg_id,p_job_id:job_id,p_tenant_id:tenant_id,p_error:retryError.message});}
     }
     return true;
   }
 }
 
-export async function runQueueWorker() {
-  const db = requireDatabase();
+export async function runQueueWorker(){
+  const db=requireDatabase();
   return runWorkerBatch({
-    acquire: async (workerToken, leaseSeconds, maxSlots) => {
-      const { data, error } = await db.rpc("forge_acquire_worker", {
-        p_worker_token: workerToken,
-        p_lease_seconds: leaseSeconds,
-        p_max_slots: maxSlots
-      });
-      if (error) throw new Error(`Falha ao adquirir worker slot: ${error.message}`);
-      return data === true;
-    },
-    release: async (workerToken) => {
-      const { error } = await db.rpc("forge_release_worker", { p_worker_token: workerToken });
-      if (error) throw new Error(`Falha ao liberar worker slot: ${error.message}`);
-    },
-    processOne: processOneJob
-  }, {
-    maxConcurrentJobs: config.MAX_CONCURRENT_JOBS,
-    maxJobs: config.MAX_JOBS_PER_WORKER_TICK,
-    leaseSeconds: 120,
-    budgetMs: 50_000
-  });
+    acquire:async(workerToken,leaseSeconds,maxSlots)=>{const {data,error}=await db.rpc("forge_acquire_worker",{p_worker_token:workerToken,p_lease_seconds:leaseSeconds,p_max_slots:maxSlots});if(error)throw new Error(`Falha ao adquirir worker slot: ${error.message}`);return data===true;},
+    release:async(workerToken)=>{const {error}=await db.rpc("forge_release_worker",{p_worker_token:workerToken});if(error)throw new Error(`Falha ao liberar worker slot: ${error.message}`);},
+    processOne:processOneJob
+  },{maxConcurrentJobs:config.MAX_CONCURRENT_JOBS,maxJobs:config.MAX_JOBS_PER_WORKER_TICK,leaseSeconds:120,budgetMs:50_000});
 }
-
-function safeJson(value:string) {
-  try { return JSON.parse(value) as unknown; } catch { return {raw:value}; }
-}
+function safeJson(value:string){try{return JSON.parse(value) as unknown;}catch{return {raw:value};}}
