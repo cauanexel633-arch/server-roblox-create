@@ -64,7 +64,7 @@ async function findOwnedJob(id:string,userId:string,universeId:number) {
   if(tenantError) throw tenantError;
   if(!tenant) return {job:null,tenantId:null};
   const {data:job,error}=await db.from("forge_jobs")
-    .select("id,tenant_id,status,progress,current_stage,last_error,created_at,updated_at,completed_at,result,request")
+    .select("id,tenant_id,status,progress,current_stage,last_error,error_code,attempts,created_at,updated_at,completed_at,result,request")
     .eq("id",id).eq("tenant_id",tenant.id).maybeSingle();
   if(error) throw error;
   if(!job) return {job:null,tenantId:tenant.id};
@@ -136,7 +136,7 @@ app.get("/v1/jobs/:id",async(req,reply)=>{
   const {job}=await findOwnedJob(params.id,query.data.user_id,query.data.universe_id);
   if(!job) return reply.code(404).send({error:"not_found"});
   const {request:_privateRequest,...publicJob}=job;
-  return {...publicJob,user_id:query.data.user_id};
+  return {...publicJob,user_id:query.data.user_id,error_message:job.status==="failed" ? "Não foi possível gerar sua arma após as tentativas automáticas. Faça uma nova solicitação." : null,can_retry:job.status==="failed" || job.status==="cancelled"};
 });
 
 app.post("/v1/jobs/:id/cancel",async(req,reply)=>{
@@ -147,7 +147,7 @@ app.post("/v1/jobs/:id/cancel",async(req,reply)=>{
   if(!query.success) return reply.code(400).send({error:"user_id_and_universe_id_required"});
   const {job}=await findOwnedJob(params.id,query.data.user_id,query.data.universe_id);
   if(!job) return reply.code(404).send({error:"not_found"});
-  const {data,error}=await requireDatabase().from("forge_jobs").update({status:"cancelled",updated_at:new Date().toISOString()})
+  const {data,error}=await requireDatabase().from("forge_jobs").update({status:"cancelled",current_stage:"cancelled",last_error:"Solicitação cancelada pelo jogador.",error_code:"cancelled_by_player",completed_at:new Date().toISOString(),updated_at:new Date().toISOString()})
     .eq("id",params.id).eq("tenant_id",job.tenant_id).in("status",["queued","processing"]).select("id,status").maybeSingle();
   if(error) throw error;
   if(!data) return reply.code(409).send({error:"not_cancellable"});
