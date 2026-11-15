@@ -50,6 +50,14 @@ local function sendStatus(player: Player, state: string, data: any?)
 	end
 end
 
+local function sendFailure(player: Player, message: string, data: any?)
+	lastRequestAt[player.UserId] = nil -- let the player retry immediately after a terminal failure
+	local payload = data or {}
+	payload.message = message
+	payload.can_retry = true
+	sendStatus(player, "error", payload)
+end
+
 local function applyVisualEffects(model: Model, visualSpec: any)
 	if typeof(visualSpec) ~= "table" then return end
 	local effects = visualSpec.effects or visualSpec
@@ -154,13 +162,13 @@ local function processWeaponRequest(player: Player, description: string)
 	end)
 	if not ok then
 		warn("[Forge3D] create job failed:", result)
-		sendStatus(player, "error", {message = "Não foi possível enviar a solicitação. Tente novamente mais tarde."})
+		sendFailure(player, "Não foi possível enviar a solicitação. Tente novamente mais tarde.")
 		return
 	end
 
 	local jobId = result.job_id
 	if typeof(jobId) ~= "string" then
-		sendStatus(player, "error", {message = "A API não retornou um identificador de geração."})
+		sendFailure(player, "A API não retornou um identificador de geração.")
 		return
 	end
 	sendStatus(player, "queued", {job_id = jobId, message = "Solicitação recebida. Iniciando processamento..."})
@@ -210,7 +218,7 @@ local function processWeaponRequest(player: Player, description: string)
 			local visualEffects = job.result and job.result.visual_effects
 			if not assetId then
 				warn("[Forge3D] completed job without Roblox asset_id:", jobId)
-				sendStatus(player, "error", {message = "A geração terminou, mas o Roblox não retornou o ID do modelo."})
+				sendFailure(player, "A geração terminou, mas o Roblox não retornou o ID do modelo.")
 				return
 			end
 
@@ -235,7 +243,7 @@ local function processWeaponRequest(player: Player, description: string)
 				end)
 				if not loadOk or not loadedModel or not loadedModel:IsA("Model") then
 					warn("[Forge3D] Roblox asset load failed:", loadedModel)
-					sendStatus(player, "error", {message = "O modelo foi publicado, mas o Roblox não conseguiu carregá-lo no servidor.", asset_id = assetId, job_id = jobId})
+					sendFailure(player, "O modelo foi publicado, mas o Roblox não conseguiu carregá-lo no servidor.", {asset_id = assetId, job_id = jobId})
 					return
 				end
 
@@ -258,12 +266,7 @@ local function processWeaponRequest(player: Player, description: string)
 			})
 			return
 		elseif job.status == "failed" or job.status == "cancelled" then
-			sendStatus(player, "error", {
-				message = job.error_message or "Não foi possível gerar sua arma. Faça uma nova solicitação.",
-				job_id = jobId,
-				can_retry = true,
-				error_code = job.error_code,
-			})
+			sendFailure(player, job.error_message or "Não foi possível gerar sua arma. Faça uma nova solicitação.", {job_id = jobId, error_code = job.error_code})
 			return
 		end
 	end
@@ -277,12 +280,7 @@ local function processWeaponRequest(player: Player, description: string)
 	if not cancelOk then
 		warn("[Forge3D] timed-out job cancellation could not be confirmed:", cancelResult)
 	end
-	sendStatus(player, "error", {
-		message = "A geração excedeu o tempo limite. A solicitação foi encerrada; faça uma nova solicitação.",
-		job_id = jobId,
-		can_retry = true,
-		error_code = "client_timeout",
-	})
+	sendFailure(player, "A geração excedeu o tempo limite. A solicitação foi encerrada; faça uma nova solicitação.", {job_id = jobId, error_code = "client_timeout"})
 end
 
 requestEvent.OnServerEvent:Connect(function(player: Player, description: any)
@@ -295,7 +293,7 @@ requestEvent.OnServerEvent:Connect(function(player: Player, description: any)
 		local ok, err = pcall(processWeaponRequest, player, description)
 		if not ok then
 			warn("[Forge3D] unexpected request handler error:", err)
-			sendStatus(player, "error", {message = "Ocorreu um erro inesperado. Faça uma nova solicitação.", can_retry = true})
+			sendFailure(player, "Ocorreu um erro inesperado. Faça uma nova solicitação.")
 		end
 		activeRequests[player.UserId] = nil
 	end)
