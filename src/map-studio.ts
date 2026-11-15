@@ -3,7 +3,7 @@ import { searchMapReferences } from "./map-reference-search.js";
 
 type Vec3 = [number, number, number];
 type JsonObject = Record<string, unknown>;
-export type MapCollider = { id:string; kind:string; position:Vec3; size:Vec3; anchored:true; can_collide:true; required:true };
+export type MapCollider = { id:string; kind:string; position:Vec3; size:Vec3; anchored:true; can_collide:true; required:boolean };
 export type MapStudioPlan = {
   schema_version:"1.0"; system:"Forge3DMapStudio"; theme:string; genre:string; biome:string;
   bounds:{width:number;depth:number;min_y:number;max_y:number};
