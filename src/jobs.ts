@@ -225,6 +225,7 @@ export async function processOneJob() {
       }
     }
     return true;
+  }
 }
 
 export async function runQueueWorker() {
