@@ -23,7 +23,7 @@ The server deterministically inserts four full-length boundary walls (north, sou
 - Thickness: 4 studs.
 - Anchored: true.
 - CanCollide: true.
-- The walls cover all four sides of the playable bounds and overlap at corners.
+- The walls cover all four sides of the playable bounds and overlap at corners.\n- A mandatory anchored, collidable recovery floor sits below the map bounds as a secondary catch surface.
 - Agent-proposed perimeter colliders are discarded so they cannot weaken or replace the mandatory barriers.
 - The validator rejects a plan if any required wall is missing, non-collidable, unanchored or too short.
 - Spawn points and generated elements are kept inside the playable bounds.
@@ -36,4 +36,4 @@ The current stage returns a validated MapStudioPlan JSON structure. It does not 
 
 ## Online reference safety
 
-Reference candidates are HTTPS-only and reject local/private network hosts. They are not described as verified sources until a dedicated search provider fetches and validates them. Never let arbitrary player URLs trigger server-side fetches.
+Reference candidates are HTTPS-only and reject local/private network hosts. When `TAVILY_API_KEY` is configured, Map Studio performs live web searches (up to three focused queries, basic depth, up to five results each). Without that key, only unverified agent candidates are returned. Never let arbitrary player URLs trigger server-side fetches.
