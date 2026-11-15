@@ -15,7 +15,7 @@ describe("classifyJobError", () => {
 });
 
 describe("retryDelaySeconds", () => {
-  it("uses bounded exponential backoff", () => {
-    expect([1, 2, 3, 4].map(retryDelaySeconds)).toEqual([20, 40, 80, 120]);
+  it("retries every four seconds regardless of attempt number", () => {
+    expect([1, 2, 3, 4, 10].map(retryDelaySeconds)).toEqual([4, 4, 4, 4, 4]);
   });
 });
