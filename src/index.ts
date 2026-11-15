@@ -4,6 +4,9 @@ import { config, hasSupabase } from "./config.js";
 import { requireDatabase } from "./db.js";
 import { verifyForgeRequest, verifyRobloxToken } from "./security.js";
 import { createJob, runQueueWorker } from "./jobs.js";
+import { randomUUID } from "node:crypto";
+import { buildMapStudioPlan } from "./map-studio.js";
+import { compileMapStudioPackage } from "./map-builder.js";
 
 const app=Fastify({
   logger:{level:config.LOG_LEVEL,redact:{paths:["req.headers.authorization","req.headers.x-forge-token","req.headers.x-forge-signature","req.headers.x-forge-nonce"],censor:"[REDACTED]"}},
@@ -124,6 +127,49 @@ app.post("/v1/generate",async(req,reply)=>{
   return reply.code(202).send({
     job_id:result.id,status:result.status,progress:("progress" in result ? result.progress : 0),
     user_id:parsed.data.player.user_id,status_url:`/v1/jobs/${result.id}?universe_id=${parsed.data.universe_id}&user_id=${parsed.data.player.user_id}`
+  });
+});
+
+const mapCompileSchema=z.object({
+  universe_id:z.number().int().positive(),
+  user_id:z.string().regex(/^\d{1,20}$/),
+  description:z.string().trim().min(12).max(2000)
+});
+
+app.post("/v1/maps/compile",async(req,reply)=>{
+  await authenticate(req);
+  const parsed=mapCompileSchema.safeParse(req.body);
+  if(!parsed.success) return reply.code(400).send({error:"invalid_request",details:parsed.error.flatten()});
+  const db=requireDatabase();
+  const {data:tenant,error:tenantError}=await db.from("forge_tenants").select("id").eq("universe_id",parsed.data.universe_id).maybeSingle();
+  if(tenantError) throw tenantError;
+  if(!tenant) return reply.code(403).send({error:"universe_not_registered"});
+
+  const plan=await buildMapStudioPlan(parsed.data.description);
+  const compiled=compileMapStudioPackage(plan);
+  const packageId=randomUUID();
+  const base=`maps/${parsed.data.universe_id}/${packageId}`;
+  const files=[
+    {name:"map-plan.json",path:`${base}/map-plan.json`,body:Buffer.from(JSON.stringify(plan,null,2)),mime:"application/json"},
+    {name:"Forge3D_MapBuilder.server.lua",path:`${base}/Forge3D_MapBuilder.server.lua`,body:Buffer.from(compiled.builder_luau),mime:"text/plain"},
+    {name:"Forge3D_BoundaryRecovery.server.lua",path:`${base}/Forge3D_BoundaryRecovery.server.lua`,body:Buffer.from(compiled.recovery_luau),mime:"text/plain"},
+    {name:"manifest.json",path:`${base}/manifest.json`,body:Buffer.from(JSON.stringify(compiled.manifest,null,2)),mime:"application/json"}
+  ];
+  for(const file of files){
+    const {error}=await db.storage.from("packages").upload(file.path,file.body,{contentType:file.mime,upsert:false});
+    if(error) throw new Error(`Falha ao empacotar ${file.name}: ${error.message}`);
+  }
+  const artifacts=await Promise.all(files.map(async file=>{
+    const {data,error}=await db.storage.from("packages").createSignedUrl(file.path,3600);
+    if(error) throw error;
+    return {name:file.name,url:data.signedUrl,expires_in:3600};
+  }));
+  return reply.code(201).send({
+    package_id:packageId,status:"compiled",system:"Forge3DMapStudio",
+    summary:{theme:plan.theme,genre:plan.genre,biome:plan.biome,bounds:plan.bounds,regions:plan.regions.length,models:plan.models.length,elements:plan.elements.length,colliders:plan.colliders.length},
+    safety:plan.safety,review:plan.review,references:plan.references,
+    artifacts,install:compiled.manifest.install,
+    limitations:["O pacote contém scripts Luau nativos e plano JSON. Execute e revise no Roblox Studio; o serviço não publica automaticamente uma experiência nem substitui o teste multiplayer."]
   });
 });
 

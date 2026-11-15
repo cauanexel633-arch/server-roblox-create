@@ -28,11 +28,19 @@ The server deterministically inserts four full-length boundary walls (north, sou
 - The validator rejects a plan if any required wall is missing, non-collidable, unanchored or too short.
 - Spawn points and generated elements are kept inside the playable bounds.
 
-A later runtime stage should also add an out-of-bounds recovery volume/teleport as defense in depth. Perimeter barriers are the primary physical containment, not a substitute for server-side character recovery.
+The compiled package also includes a server-side character recovery script as defense in depth. Perimeter barriers remain the primary physical containment.
 
-## Output
+## Output and native Roblox compilation
 
-The current stage returns a validated MapStudioPlan JSON structure. It does not yet create Roblox Instances, terrain, final mesh files, UVs, texture images or publish a map. A separate MapBuilder/Roblox package stage must convert the plan into Terrain/Parts/MeshParts, apply CollisionGroups, package assets, and run a Studio multiplayer test.
+The pipeline now compiles the validated plan into a downloadable package through the authenticated `POST /v1/maps/compile` endpoint:
+- `map-plan.json`: validated structured plan.
+- `Forge3D_MapBuilder.server.lua`: native Roblox Parts/Models plus Terrain substrate, regional materials, RGB palette, landmark/spawn visuals, and all mandatory safety colliders.
+- `Forge3D_BoundaryRecovery.server.lua`: server-side Heartbeat guard that returns characters beyond map bounds or below the recovery threshold to a safe spawn.
+- `manifest.json`: package files, safety guarantees, part budget and installation steps.
+
+The API stores each file in the private `packages` bucket and returns signed download URLs that expire after one hour. The builder uses native Roblox geometry and does not require EditableMesh permissions. It creates deterministic primitive assemblies for models (for example towers, bridges, buildings, trees and rocks); arbitrary high-detail meshes, UV texture maps and rasterized PBR textures are not yet generated.
+
+Installation requires running the builder once in Roblox Studio Command Bar, then placing the recovery script in ServerScriptService. The generated map is not automatically inserted into a live experience or published by the cloud service. Review the geometry and run a multiplayer Studio test before publishing.
 
 ## Online reference safety
 
