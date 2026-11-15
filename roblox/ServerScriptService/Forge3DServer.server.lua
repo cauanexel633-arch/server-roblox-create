@@ -49,8 +49,14 @@ local function sendStatus(player: Player, state: string, data: any?)
 	end
 end
 
-local function applyVisualEffects(model: Model, effects: any)
-	if typeof(effects) ~= "table" then return end
+local function applyVisualEffects(model: Model, visualSpec: any)
+	if typeof(visualSpec) ~= "table" then return end
+	local effects = visualSpec.effects or visualSpec
+	local palette = visualSpec.palette
+	local rgb = typeof(palette) == "table" and palette.primary or nil
+	local effectColor = typeof(rgb) == "table" and #rgb == 3
+		and Color3.new(math.clamp(tonumber(rgb[1]) or 0.12, 0, 1), math.clamp(tonumber(rgb[2]) or 0.95, 0, 1), math.clamp(tonumber(rgb[3]) or 0.08, 0, 1))
+		or Color3.fromRGB(40, 255, 35)
 	local targetPart: BasePart? = nil
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") and (not targetPart or descendant.Size.Y > targetPart.Size.Y) then
@@ -70,7 +76,7 @@ local function applyVisualEffects(model: Model, effects: any)
 		local fire = Instance.new("ParticleEmitter")
 		fire.Name = "Forge3D_GreenFire"
 		fire.Texture = "rbxasset://textures/particles/fire_main.dds"
-		fire.Color = ColorSequence.new(Color3.fromRGB(40, 255, 35), Color3.fromRGB(150, 255, 90))
+		fire.Color = ColorSequence.new(effectColor, effectColor:Lerp(Color3.new(1, 1, 1), 0.35))
 		fire.LightEmission = 1
 		fire.Rate = 28
 		fire.Lifetime = NumberRange.new(0.35, 0.8)
@@ -86,7 +92,7 @@ local function applyVisualEffects(model: Model, effects: any)
 		if not light then
 			light = Instance.new("PointLight")
 			light.Name = "Forge3D_GreenAura"
-			light.Color = Color3.fromRGB(45, 255, 35)
+			light.Color = effectColor
 			light.Brightness = 1.6
 			light.Range = 10
 			light.Parent = targetPart
@@ -95,7 +101,7 @@ local function applyVisualEffects(model: Model, effects: any)
 			local aura = Instance.new("ParticleEmitter")
 			aura.Name = "Forge3D_AuraParticles"
 			aura.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			aura.Color = ColorSequence.new(Color3.fromRGB(50, 255, 30), Color3.fromRGB(170, 255, 130))
+			aura.Color = ColorSequence.new(effectColor, effectColor:Lerp(Color3.new(1, 1, 1), 0.5))
 			aura.LightEmission = 1
 			aura.Rate = 14
 			aura.Lifetime = NumberRange.new(0.6, 1.3)
@@ -231,6 +237,11 @@ local function processWeaponRequest(player: Player, description: string)
 				loadedModel:SetAttribute("JobID", jobId)
 				loadedModel:SetAttribute("AssetId", assetId)
 				loadedModel.Parent = weaponsFolder
+				existingModel = loadedModel
+			end
+
+			if existingModel and existingModel:IsA("Model") then
+				applyVisualEffects(existingModel, visualEffects)
 			end
 
 			sendStatus(player, "generated_package_ready", {
