@@ -12,7 +12,7 @@ const MAX_JOB_ATTEMPTS = 3;
 
 function classifyJobError(error: unknown): { retryable: boolean; code: string } {
   const message = error instanceof Error ? error.message : String(error);
-  const status = Number(message.match(/(?:HTTP\\s*|status\\s*)(\\d{3})/i)?.[1] ?? 0);
+  const status = Number(message.match(/(?:HTTP\s*|status\s*)(\d{3})/i)?.[1] ?? 0);
   if (status === 429) return { retryable: true, code: "provider_rate_limited" };
   if (status === 408 || status === 425 || status >= 500) return { retryable: true, code: "upstream_unavailable" };
   if (/timeout|timed out|aborted|ECONNRESET|ECONNREFUSED|EAI_AGAIN|fetch failed|network/i.test(message)) {
