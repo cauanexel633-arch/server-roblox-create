@@ -84,13 +84,13 @@ security definer
 set search_path = public
 as $$
 declare
-  v_released boolean;
+  v_rows integer;
 begin
   update public.forge_worker_slots
   set worker_token = null, lease_until = null, updated_at = now()
   where worker_token = p_worker_token;
-  get diagnostics v_released = row_count;
-  return v_released;
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
 end;
 $$;
 
