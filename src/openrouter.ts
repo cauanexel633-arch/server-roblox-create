@@ -76,7 +76,8 @@ function shouldTryNextModel(error: unknown): boolean {
   }
   // Authentication failures and other permanent client errors are not fixed
   // by changing models (e.g. an invalid OpenRouter API key).
-  return false;
+  // Network/transport errors often have no HTTP status; give another provider a chance.
+  return status === undefined;
 }
 
 export async function freeModels(signal?: AbortSignal): Promise<Model[]> {
