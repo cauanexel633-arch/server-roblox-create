@@ -49,6 +49,70 @@ local function sendStatus(player: Player, state: string, data: any?)
 	end
 end
 
+local function applyVisualEffects(model: Model, visualSpec: any)
+	if typeof(visualSpec) ~= "table" then return end
+	local effects = visualSpec.effects or visualSpec
+	local palette = visualSpec.palette
+	local rgb = typeof(palette) == "table" and palette.primary or nil
+	local effectColor = typeof(rgb) == "table" and #rgb == 3
+		and Color3.new(math.clamp(tonumber(rgb[1]) or 0.12, 0, 1), math.clamp(tonumber(rgb[2]) or 0.95, 0, 1), math.clamp(tonumber(rgb[3]) or 0.08, 0, 1))
+		or Color3.fromRGB(40, 255, 35)
+	local targetPart: BasePart? = nil
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") and (not targetPart or descendant.Size.Y > targetPart.Size.Y) then
+			targetPart = descendant
+		end
+	end
+	if not targetPart then return end
+
+	local attachment = targetPart:FindFirstChild("Forge3D_VFXAttachment") :: Attachment?
+	if not attachment then
+		attachment = Instance.new("Attachment")
+		attachment.Name = "Forge3D_VFXAttachment"
+		attachment.Parent = targetPart
+	end
+
+	if effects.fire == true and not attachment:FindFirstChild("Forge3D_GreenFire") then
+		local fire = Instance.new("ParticleEmitter")
+		fire.Name = "Forge3D_GreenFire"
+		fire.Texture = "rbxasset://textures/particles/fire_main.dds"
+		fire.Color = ColorSequence.new(effectColor, effectColor:Lerp(Color3.new(1, 1, 1), 0.35))
+		fire.LightEmission = 1
+		fire.Rate = 28
+		fire.Lifetime = NumberRange.new(0.35, 0.8)
+		fire.Speed = NumberRange.new(0.35, 1.1)
+		fire.SpreadAngle = Vector2.new(18, 18)
+		fire.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.22), NumberSequenceKeypoint.new(1, 0)})
+		fire.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.12), NumberSequenceKeypoint.new(1, 1)})
+		fire.Parent = attachment
+	end
+
+	if effects.aura == true then
+		local light = targetPart:FindFirstChild("Forge3D_GreenAura") :: PointLight?
+		if not light then
+			light = Instance.new("PointLight")
+			light.Name = "Forge3D_GreenAura"
+			light.Color = effectColor
+			light.Brightness = 1.6
+			light.Range = 10
+			light.Parent = targetPart
+		end
+		if not attachment:FindFirstChild("Forge3D_AuraParticles") then
+			local aura = Instance.new("ParticleEmitter")
+			aura.Name = "Forge3D_AuraParticles"
+			aura.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			aura.Color = ColorSequence.new(effectColor, effectColor:Lerp(Color3.new(1, 1, 1), 0.5))
+			aura.LightEmission = 1
+			aura.Rate = 14
+			aura.Lifetime = NumberRange.new(0.6, 1.3)
+			aura.Speed = NumberRange.new(0.15, 0.65)
+			aura.SpreadAngle = Vector2.new(180, 180)
+			aura.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.12), NumberSequenceKeypoint.new(1, 0)})
+			aura.Parent = attachment
+		end
+	end
+end
+
 local function processWeaponRequest(player: Player, description: string)
 	if typeof(description) ~= "string" then return end
 	description = string.gsub(description, "^%s*(.-)%s*$", "%1")
@@ -136,6 +200,7 @@ local function processWeaponRequest(player: Player, description: string)
 
 		if job.status == "completed" then
 			local assetId = tonumber(job.result and job.result.asset_id)
+			local visualEffects = job.result and job.result.visual_effects
 			if not assetId then
 				warn("[Forge3D] completed job without Roblox asset_id:", jobId)
 				sendStatus(player, "error", {message = "A geração terminou, mas o Roblox não retornou o ID do modelo."})
@@ -172,6 +237,11 @@ local function processWeaponRequest(player: Player, description: string)
 				loadedModel:SetAttribute("JobID", jobId)
 				loadedModel:SetAttribute("AssetId", assetId)
 				loadedModel.Parent = weaponsFolder
+				existingModel = loadedModel
+			end
+
+			if existingModel and existingModel:IsA("Model") then
+				applyVisualEffects(existingModel, visualEffects)
 			end
 
 			sendStatus(player, "generated_package_ready", {

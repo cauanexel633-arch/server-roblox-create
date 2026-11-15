@@ -1,6 +1,7 @@
 import { describe,it,expect } from "vitest";
 import { createSwordMesh,meshToObj } from "../src/geometry.js";
 import { meshToGlb } from "../src/glb.js";
+import { parseWeaponSpec } from "../src/weapon-spec.js";
 
 describe("procedural mesh pipeline",()=>{
   it("creates a non-empty deterministic triangular mesh",()=>{
@@ -15,5 +16,16 @@ describe("procedural mesh pipeline",()=>{
     const glb=meshToGlb(mesh);
     expect(Buffer.from(glb).readUInt32LE(0)).toBe(0x46546c67);
     expect(Buffer.from(glb).readUInt32LE(4)).toBe(2);
+  });
+  it("adds description-driven green flame geometry and vertex colors",()=>{
+    const spec=parseWeaponSpec("uma espada de fogo verde com aura verde","");
+    const mesh=createSwordMesh(20000,spec);
+    expect(mesh.colors).toHaveLength(mesh.positions.length);
+    expect(mesh.triangleCount).toBeGreaterThan(createSwordMesh().triangleCount);
+    expect(mesh.colors.some((value,index)=>index%3===1&&value>0.9)).toBe(true);
+    const glb=Buffer.from(meshToGlb(mesh));
+    const jsonLength=glb.readUInt32LE(12);
+    const json=JSON.parse(glb.subarray(20,20+jsonLength).toString("utf8").trim()) as {meshes:Array<{primitives:Array<{attributes:Record<string,number>}>}>};
+    expect(json.meshes[0]?.primitives[0]?.attributes.COLOR_0).toBeDefined();
   });
 });
