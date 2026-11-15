@@ -4,6 +4,7 @@ const schema = z.object({
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   OPENROUTER_API_KEY: z.string().min(1).optional(),
+  TAVILY_API_KEY: z.string().min(1).optional(),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   FORGE_HMAC_KEY_ID: z.string().default("primary"),
   FORGE_HMAC_KEY_ID_PREVIOUS: z.string().optional(),
