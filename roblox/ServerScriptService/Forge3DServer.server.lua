@@ -12,6 +12,7 @@ local AssetService = game:GetService("AssetService")
 local API_BASE = "https://server-roblox-create.vercel.app"
 local UNIVERSE_ID = 10776153543
 local MAX_DESCRIPTION_LENGTH = 1000
+local MAX_MAP_DESCRIPTION_LENGTH = 2000
 local PLAYER_COOLDOWN_SECONDS = 60
 local POLL_INTERVAL_SECONDS = 3
 local MAX_POLL_ATTEMPTS = 200 -- 10-minute server-side deadline
@@ -283,14 +284,90 @@ local function processWeaponRequest(player: Player, description: string)
 	sendFailure(player, "A geração excedeu o tempo limite. A solicitação foi encerrada; faça uma nova solicitação.", {job_id = jobId, error_code = "client_timeout"})
 end
 
-requestEvent.OnServerEvent:Connect(function(player: Player, description: any)
+
+local function processMapRequest(player: Player, description: string)
+	if typeof(description) ~= "string" then
+		sendStatus(player, "error", {message = "A descrição do mapa deve ser um texto."})
+		return
+	end
+	description = string.gsub(description, "^%s*(.-)%s*$", "%1")
+	if #description < 12 or #description > MAX_MAP_DESCRIPTION_LENGTH then
+		sendStatus(player, "error", {message = "A descrição do mapa deve ter entre 12 e 2000 caracteres."})
+		return
+	end
+
+	local now = os.clock()
+	local previous = lastRequestAt[player.UserId] or 0
+	if now - previous < PLAYER_COOLDOWN_SECONDS then
+		sendStatus(player, "error", {message = "Aguarde antes de enviar outra solicitação."})
+		return
+	end
+	lastRequestAt[player.UserId] = now
+
+	sendStatus(player, "submitting", {message = "Enviando sua solicitação de mapa ao Map Studio..."})
+	local payload = {
+		universe_id = UNIVERSE_ID,
+		user_id = tostring(player.UserId),
+		description = description,
+	}
+
+	local ok, result = pcall(function()
+		return requestApi("POST", "/v1/maps/compile", payload)
+	end)
+	if not ok then
+		warn("[Forge3D] map compilation failed:", result)
+		lastRequestAt[player.UserId] = nil
+		sendStatus(player, "error", {message = "Não foi possível compilar o mapa. Tente novamente mais tarde.", request_type = "map"})
+		return
+	end
+
+	if typeof(result.package_id) ~= "string" or typeof(result.artifacts) ~= "table" then
+		lastRequestAt[player.UserId] = nil
+		sendStatus(player, "error", {message = "O Map Studio não retornou um pacote válido.", request_type = "map"})
+		return
+	end
+
+	sendStatus(player, "map_package_ready", {
+		package_id = result.package_id,
+		system = result.system,
+		summary = result.summary,
+		safety = result.safety,
+		review = result.review,
+		references = result.references,
+		artifacts = result.artifacts,
+		install = result.install,
+		limitations = result.limitations,
+		message = "Mapa compilado. Baixe os scripts do pacote e siga as instruções de instalação no Roblox Studio.",
+	})
+end
+
+local function dispatchRequest(player: Player, solicitacao: any, textSolicitacao: any)
+	if typeof(solicitacao) ~= "number" or solicitacao % 1 ~= 0 then
+		sendStatus(player, "error", {message = "O tipo de solicitação deve ser 1 (arma) ou 2 (mapa)."})
+		return
+	end
+	if typeof(textSolicitacao) ~= "string" then
+		sendStatus(player, "error", {message = "A descrição da solicitação deve ser um texto."})
+		return
+	end
+
+	if solicitacao == 1 then
+		processWeaponRequest(player, textSolicitacao)
+	elseif solicitacao == 2 then
+		processMapRequest(player, textSolicitacao)
+	else
+		sendStatus(player, "error", {message = "Tipo de solicitação inválido. Use 1 para arma ou 2 para mapa."})
+	end
+end
+
+requestEvent.OnServerEvent:Connect(function(player: Player, solicitacao: any, text_solicitacao: any)
 	if activeRequests[player.UserId] then
 		sendStatus(player, "error", {message = "Você já tem uma solicitação em andamento. Aguarde o resultado."})
 		return
 	end
 	activeRequests[player.UserId] = true
 	task.spawn(function()
-		local ok, err = pcall(processWeaponRequest, player, description)
+		local ok, err = pcall(dispatchRequest, player, solicitacao, text_solicitacao)
 		if not ok then
 			warn("[Forge3D] unexpected request handler error:", err)
 			sendFailure(player, "Ocorreu um erro inesperado. Faça uma nova solicitação.")
