@@ -16,5 +16,5 @@ export function classifyJobError(error: unknown): JobFailureClassification {
 
 export function retryDelaySeconds(attempt: number): number {
   const safeAttempt = Math.max(1, Math.floor(attempt));
-  return Math.min(120, 20 * 2 ** (safeAttempt - 1));
+  return 4;
 }
