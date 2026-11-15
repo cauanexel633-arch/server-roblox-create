@@ -22,7 +22,7 @@ let modelCursor = 0;
 const AGENT_BUDGET_MS = 20_000;
 const CATALOG_TIMEOUT_MS = 5_000;
 const MODEL_TIMEOUT_MS = 4_500;
-const MAX_MODEL_ATTEMPTS = 6;
+const MAX_MODEL_ATTEMPTS = 4;
 const CHAT_COMPLETIONS_ENDPOINT = "/api/v1/chat/completions";
 
 function isTextCapable(model: Model): boolean {
