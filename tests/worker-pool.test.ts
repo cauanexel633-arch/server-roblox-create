@@ -8,9 +8,8 @@ describe("runWorkerBatch", () => {
     const result = await runWorkerBatch({
       acquire: async () => false,
       release,
-      processOne,
-      maxConcurrentJobs: 3
-    });
+      processOne
+    }, { maxConcurrentJobs: 3 });
 
     expect(result).toEqual({ acquired: false, processed: 0, exhausted: false });
     expect(processOne).not.toHaveBeenCalled();
@@ -28,10 +27,8 @@ describe("runWorkerBatch", () => {
     const result = await runWorkerBatch({
       acquire,
       release,
-      processOne,
-      maxConcurrentJobs: 3,
-      maxJobs: 8
-    });
+      processOne
+    }, { maxConcurrentJobs: 3, maxJobs: 8 });
 
     expect(acquire).toHaveBeenCalledWith(expect.any(String), 120, 3);
     expect(processOne).toHaveBeenCalledTimes(3);
@@ -44,9 +41,8 @@ describe("runWorkerBatch", () => {
     await expect(runWorkerBatch({
       acquire: async () => true,
       release,
-      processOne: async () => { throw new Error("processing failure"); },
-      maxConcurrentJobs: 3
-    })).rejects.toThrow("processing failure");
+      processOne: async () => { throw new Error("processing failure"); }
+    }, { maxConcurrentJobs: 3 })).rejects.toThrow("processing failure");
     expect(release).toHaveBeenCalledTimes(1);
   });
 
@@ -55,10 +51,8 @@ describe("runWorkerBatch", () => {
     const result = await runWorkerBatch({
       acquire: async () => true,
       release: async () => undefined,
-      processOne,
-      maxConcurrentJobs: 3,
-      maxJobs: 2
-    });
+      processOne
+    }, { maxConcurrentJobs: 3, maxJobs: 2 });
     expect(processOne).toHaveBeenCalledTimes(2);
     expect(result).toEqual({ acquired: true, processed: 2, exhausted: true });
   });
