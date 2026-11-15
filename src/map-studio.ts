@@ -37,7 +37,9 @@ function boundary(width:number,depth:number,minY:number):MapCollider[]{
     {id:"safety_wall_north",kind:"mandatory_perimeter_barrier",position:[0,centerY,-depth/2],size:[width+thickness*2,height,thickness],anchored:true,can_collide:true,required:true},
     {id:"safety_wall_south",kind:"mandatory_perimeter_barrier",position:[0,centerY,depth/2],size:[width+thickness*2,height,thickness],anchored:true,can_collide:true,required:true},
     {id:"safety_wall_west",kind:"mandatory_perimeter_barrier",position:[-width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true},
-    {id:"safety_wall_east",kind:"mandatory_perimeter_barrier",position:[width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true},\n    {id:"safety_recovery_floor",kind:"safety_recovery_floor",position:[0,minY-80,0],size:[width+512,8,depth+512],anchored:true,can_collide:true,required:true}\n  ];
+    {id:"safety_wall_east",kind:"mandatory_perimeter_barrier",position:[width/2,centerY,0],size:[thickness,height,depth],anchored:true,can_collide:true,required:true},
+    {id:"safety_recovery_floor",kind:"safety_recovery_floor",position:[0,minY-80,0],size:[width+512,8,depth+512],anchored:true,can_collide:true,required:true}
+  ];
 }
 function validInside(position:Vec3,size:Vec3,width:number,depth:number):boolean{return Math.abs(position[0])+size[0]/2<=width/2&&Math.abs(position[2])+size[2]/2<=depth/2;}
 export function validateMapStudioPlan(plan:MapStudioPlan):{valid:boolean;errors:string[]}{
@@ -45,7 +47,8 @@ export function validateMapStudioPlan(plan:MapStudioPlan):{valid:boolean;errors:
   if(plan.colliders.filter(c=>c.required&&c.kind==="mandatory_perimeter_barrier").length!==4)errors.push("O mapa precisa ter exatamente quatro barreiras obrigatórias no perímetro.");
   const ids=new Set(plan.colliders.map(c=>c.id));
   for(const id of ["safety_wall_north","safety_wall_south","safety_wall_east","safety_wall_west"])if(!ids.has(id))errors.push(`Barreira obrigatória ausente: ${id}`);
-  for(const c of plan.colliders.filter(x=>x.required)){if(!c.anchored)errors.push(`Colisor obrigatório ${c.id} não está ancorado.`);if(!c.can_collide)errors.push(`Colisor obrigatório ${c.id} não possui colisão.`);if(c.kind==="mandatory_perimeter_barrier"&&c.size[1]<24)errors.push(`Barreira ${c.id} tem altura inferior a 24 studs.`);}\n  if(!ids.has("safety_recovery_floor"))errors.push("Piso de recuperação anti-queda ausente.");
+  for(const c of plan.colliders.filter(x=>x.required)){if(!c.anchored)errors.push(`Colisor obrigatório ${c.id} não está ancorado.`);if(!c.can_collide)errors.push(`Colisor obrigatório ${c.id} não possui colisão.`);if(c.kind==="mandatory_perimeter_barrier"&&c.size[1]<24)errors.push(`Barreira ${c.id} tem altura inferior a 24 studs.`);}
+  if(!ids.has("safety_recovery_floor"))errors.push("Piso de recuperação anti-queda ausente.");
   for(const e of plan.elements)if(!validInside(e.position,e.size,plan.bounds.width,plan.bounds.depth))errors.push(`Elemento ${e.id} ultrapassa os limites jogáveis.`);
   for(const m of plan.models)if(!validInside(m.position,m.size,plan.bounds.width,plan.bounds.depth))errors.push(`Modelo ${m.id} ultrapassa os limites jogáveis.`);
   if(plan.spawns.some(p=>Math.abs(p[0])>plan.bounds.width/2-8||Math.abs(p[2])>plan.bounds.depth/2-8))errors.push("Existe ponto de spawn muito próximo ou fora do perímetro.");
@@ -59,14 +62,17 @@ export async function buildMapStudioPlan(description:string):Promise<MapStudioPl
   const [interpretation,references,architecture,elements,modeling,texturing,palette,collisions,review]=await Promise.all([
     runAgent("MapInterpreter",input),runAgent("MapReferenceScout",input),runAgent("MapArchitect",input),runAgent("MapElementPlanner",input),runAgent("MapModeler3D",input),runAgent("MapTexturizer",input),runAgent("MapPaletteDirector",input),runAgent("MapCollider3D",input),runAgent("MapReviewer",input)
   ]);
-  const i=parse(interpretation),r=parse(references),a=parse(architecture),e=parse(elements),m=parse(modeling),t=parse(texturing),p=parse(palette),c=parse(collisions),v=parse(review);\n  const searchQueries=list(r.search_queries,8).filter((x):x is string=>typeof x==="string").map(x=>x.slice(0,120));\n  const onlineReferences=await searchMapReferences(searchQueries.length?searchQueries:[`Roblox ${text(i.genre,"game")} ${text(i.biome,"map")} level design 3D environment reference`]);
+  const i=parse(interpretation),r=parse(references),a=parse(architecture),e=parse(elements),m=parse(modeling),t=parse(texturing),p=parse(palette),c=parse(collisions),v=parse(review);
+  const searchQueries=list(r.search_queries,8).filter((x):x is string=>typeof x==="string").map(x=>x.slice(0,120));
+  const onlineReferences=await searchMapReferences(searchQueries.length?searchQueries:[`Roblox ${text(i.genre,"game")} ${text(i.biome,"map")} level design 3D environment reference`]);
   const scale=object(i.scale),width=number(scale.width,512,128,4096),depth=number(scale.depth,512,128,4096),minY=number(scale.bounds_min_y,0,-500,500),maxY=number(scale.bounds_max_y,256,minY+64,2000);
   const rawPalette=object(p.palette);
   const regions=list(a.regions,24).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`region_${n+1}`),name:text(o.name,`Região ${n+1}`),kind:text(o.kind,"zone"),center:vec(o.center,[0,0,0]),size:vec(o.size,[64,32,64],width)};});
   const rawElements=list(e.elements,200).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`element_${n+1}`),kind:text(o.kind,"prop"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],256),material:text(o.material,"Plastic"),region_id:safeId(o.region_id,"central")};}).filter(x=>validInside(x.position,x.size,width,depth));
   const models=list(m.models,120).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`model_${n+1}`),kind:text(o.kind,"modular_mesh"),position:vec(o.position,[0,0,0]),size:vec(o.size,[8,8,8],512),complexity:number(o.complexity,100,1,100000)};}).filter(x=>validInside(x.position,x.size,width,depth));
   const materials=list(t.materials,64).map((x,n)=>{const o=object(x);return{id:safeId(o.id,`material_${n+1}`),material:text(o.material,"Concrete"),color:rgb(o.color,[0.5,0.5,0.5]),roughness:number(o.roughness,0.8,0,1),metalness:number(o.metalness,0,0,1),region_id:safeId(o.region_id,"central")};});
-  const agentRefs=list(r.references,5).flatMap(x=>{const o=object(x),url=safeHttps(o.url);return url?[{url,title:text(o.title,"Visual reference"),reason:text(o.reason,"Inspiration visual")}]:[];});\n  const candidateRefs=[...onlineReferences.results,...agentRefs.filter(x=>!onlineReferences.results.some(y=>y.url===x.url))].slice(0,10);
+  const agentRefs=list(r.references,5).flatMap(x=>{const o=object(x),url=safeHttps(o.url);return url?[{url,title:text(o.title,"Visual reference"),reason:text(o.reason,"Inspiration visual")}]:[];});
+  const candidateRefs=[...onlineReferences.results,...agentRefs.filter(x=>!onlineReferences.results.some(y=>y.url===x.url))].slice(0,10);
   const colliders=[...boundary(width,depth,minY),...list(c.colliders,300).flatMap((x,n)=>{const o=object(x);if(o.kind==="mandatory_perimeter_barrier")return[];return[{id:safeId(o.id,`collider_${n+1}`),kind:text(o.kind,"prop_collider"),position:vec(o.position,[0,0,0]),size:vec(o.size,[4,4,4],512),anchored:true as const,can_collide:true as const,required:false}];})];
   const rawSpawns=list(a.spawns,16).map(x=>vec(x,[0,4,0])).filter(x=>Math.abs(x[0])<=width/2-8&&Math.abs(x[2])<=depth/2-8);
   const plan:MapStudioPlan={
