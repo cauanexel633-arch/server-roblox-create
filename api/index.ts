@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance } from 'fastify';
-import { criarApp } from '../src/app.js';
+import { criarApp } from '../src/criar-app.js';
 import { carregarConfig } from '../src/config.js';
 import { criarRepositorioSupabase } from '../src/db/supabase.js';
 import { criarProvedor } from '../src/ia/provedor.js';

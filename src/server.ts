@@ -1,4 +1,4 @@
-import { criarApp } from './app.js';
+import { criarApp } from './criar-app.js';
 import { carregarConfig } from './config.js';
 import { criarRepositorioSupabase } from './db/supabase.js';
 import { criarProvedor } from './ia/provedor.js';

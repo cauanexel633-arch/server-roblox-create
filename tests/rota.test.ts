@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { criarApp } from '../src/app.js';
+import { criarApp } from '../src/criar-app.js';
 import { LimitadorJanela } from '../src/ratelimit.js';
 import { iaFalsa, repoFalso } from './fixtures.js';
 
