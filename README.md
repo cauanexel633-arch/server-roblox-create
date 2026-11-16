@@ -1,58 +1,65 @@
-# Forge3D Cloud V2
+# criador-backend
 
-Backend serverless para geração procedural de armas e assets 3D para Roblox. O repositório foi reconstruído para a arquitetura definida no MASTER ENGINEERING PROMPT — FORGE3D CLOUD V2.
+Servidor HTTP que recebe pedidos do jogo Roblox, interpreta a descrição com um modelo de IA (OpenRouter) e devolve uma receita validada de arma ou mapa. Sucessos vão para `criacoes`; falhas vão para `pedidos_falhos` com o motivo.
 
-## Estado real desta entrega
-
-Esta reconstrução estabelece a fundação executável: API Fastify para Vercel, autenticação HMAC com proteção anti-replay, persistência Supabase, fila baseada em pgmq, processador retomável por Cron, roteador OpenRouter restrito a modelos gratuitos, geração determinística de malha de espada e exportação GLB/OBJ, além de migrations e contratos OpenAPI.
-
-Não declare como concluídos recursos ainda não implementados. Rigging/skinning, UV unwrap/packing, texturas PBR rasterizadas, animações com keyframes, renderização, AST Luau completa, auditoria isolada Ed25519, busca vetorial e publicação Open Cloud são etapas posteriores. Consulte `docs/STATUS.md`.
-
-## Integração Roblox
-
-A primeira integração server-to-server para solicitações por jogador está em `docs/ROBLOX_INTEGRATION.md`, com exemplos Luau em `roblox/`. O backend associa jobs a `player.user_id`, protege status/pacotes por jogador e aplica limite por hora. A entrega final como Tool ainda depende de importação/publicação do modelo como asset Roblox.
-
-## Stack
-
-- Node.js 22 + TypeScript strict + Fastify 5
-- Vercel Functions + Vercel Cron
-- Supabase PostgreSQL, Storage e pgmq
-- OpenRouter via SDK OpenAI compatível, filtrando modelos com sufixo `:free`
-- Geometria procedural própria, sem Blender, Docker, Python ou executáveis externos
-
-## Rotas
-
-- `POST /v1/generate` — cria job autenticado
-- `GET /v1/jobs/:id` — status e progresso
-- `POST /v1/jobs/:id/cancel` — cancelamento
-- `GET /v1/weapons/:id/package` — manifesto e URLs temporárias
-- `GET /health` e `GET /ready`
-- `POST /api/internal/process-queue` — Cron protegido
-
-## Configuração
-
-1. Crie um projeto Supabase e configure as variáveis de ambiente da Vercel conforme `.env.example`.
-2. Aplique migrations em `supabase/migrations` no SQL Editor do Supabase.
-3. A migration cria o bucket privado `packages`. Cadastre cada universo autorizado no SQL Editor: `insert into public.forge_tenants(universe_id,name) values (SEU_UNIVERSE_ID,'Nome do jogo');`.
-4. Configure `CRON_SECRET`, `FORGE_HMAC_SECRET` e `OPENROUTER_API_KEY` como variáveis server-side na Vercel.
-5. Configure o segredo HMAC correspondente no servidor Roblox. Nunca coloque esse segredo em LocalScript ou ReplicatedStorage.
-6. Conecte o repositório à Vercel e faça deploy pela integração Git. O Cron foi deixado em execução diária para compatibilidade conservadora com Hobby; processamento frequente exige plano e configuração de Cron compatíveis, ou disparo autenticado do endpoint pelo servidor do jogo.
-
-## Assinatura HMAC
-
-A assinatura é HMAC-SHA256 de `timestamp.nonce.rawBody`. Cabeçalhos: `X-Forge-Timestamp`, `X-Forge-Nonce`, `X-Forge-Signature`, `X-Forge-Key-Id`. Timestamp tolerado: 30 segundos. Nonces são persistidos no Supabase.
-
-## Desenvolvimento
+## Rodar localmente
 
 ```bash
-pnpm install
-pnpm typecheck
-pnpm test
-pnpm dev
+npm install
+cp .env.example .env   # preencha as variáveis
+npm run dev            # servidor em watch mode
+npm test               # testes (provedor de IA falso, sem chamadas reais)
+npm run build && npm start
 ```
 
-Não é necessário instalar Blender, Docker ou Python. Testes locais são opcionais; produção executa exclusivamente em Vercel Functions.
+## Aplicar migrações no Supabase
 
-## Limites
+Opção A, pelo SQL Editor: execute na ordem os arquivos
+1. `supabase/migrations/20261116120000_schema_inicial.sql`
+2. `supabase/migrations/20261116120100_rpc_registrar_criacao.sql`
+3. `supabase/seed.sql` (opcional, catálogo inicial)
 
-A Vercel não é um worker de longa duração. Cada tick processa quantidade limitada de mensagens e persiste checkpoints. A duração configurada deve respeitar o plano da conta. Os modelos gratuitos do OpenRouter podem sofrer indisponibilidade ou rate limit; o job permanece retomável, sem fallback pago.
+Opção B, com a Supabase CLI: `supabase db push` (o diretório `supabase/migrations/` é o padrão).
+
+## Exemplos de requisição
+
+Arma:
+```bash
+curl -X POST http://localhost:3000/pedidos \
+  -H "Authorization: Bearer $GAME_SHARED_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jogador_id":123,"tipo":"arma","descricao":"uma pistola com balas de metal","inventario":{"metal":10,"madeira":5,"polvora":4}}'
+```
+
+Mapa:
+```bash
+curl -X POST http://localhost:3000/pedidos \
+  -H "Authorization: Bearer $GAME_SHARED_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jogador_id":123,"tipo":"mapa","descricao":"uma pequena arena com um pilar no centro e spawn","inventario":{"metal":10,"madeira":20}}'
+```
+
+Respostas: `200` com `{"ok":true,...}` para sucesso ou falha de negócio; `400` para entrada inválida; `401` sem token correto; `500` apenas para erro interno.
+
+## Custo e inventário
+
+O backend calcula o `custo` e devolve no sucesso. O desconto do inventário ainda não é feito pelo servidor, porque o inventário não está no Supabase. Por isso, o Roblox aplica o custo devolvido. Quando o inventário for migrado para o banco, adicione o débito dentro da função `registrar_criacao`.
+
+## Estrutura
+
+```
+src/
+  server.ts            bootstrap
+  app.ts               Fastify + tratamento de erros
+  routes/pedidos.ts    POST /pedidos
+  auth.ts              token em tempo constante
+  ratelimit.ts         limitador em memória (interface plugável)
+  config.ts            variáveis de ambiente (Zod)
+  db/supabase.ts       repositório Supabase
+  ia/provedor.ts       provedor OpenRouter com timeout
+  ia/prompts.ts        templates de prompt de arma e mapa
+  dominio/             lógica pura: schemas, validarArma, validarMapa, custo, processarPedido
+supabase/migrations/   schema e rpc
+supabase/seed.sql      catálogo inicial
+tests/                 Vitest
+```
